@@ -19,7 +19,6 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 
 	"go.woodpecker-ci.org/woodpecker/v2/pipeline"
 	backend "go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/types"
@@ -44,7 +43,7 @@ func (r *Runner) createLogger(logger zerolog.Logger, uploads *sync.WaitGroup, wo
 
 		logStream := rpc.NewLineWriter(r.client, step.UUID, secrets...)
 		if _, err := io.Copy(logStream, rc); err != nil {
-			log.Error().Err(err).Msg("copy limited logStream part")
+			loglogger.Error().Err(err).Msg("copy limited logStream part")
 		}
 
 		loglogger.Debug().Msg("log stream copied, close ...")
