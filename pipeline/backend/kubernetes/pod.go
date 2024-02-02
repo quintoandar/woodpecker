@@ -43,7 +43,7 @@ func mkPod(step *types.Step, config *config, podName, goos string) (*v1.Pod, err
 		return nil, err
 	}
 
-	spec, err := podSpec(step, config)
+	spec, err := podSpec(step, config, meta.Labels)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +93,13 @@ func podMeta(step *types.Step, config *config, podName string) (metav1.ObjectMet
 		meta.Labels[ServiceLabel] = step.Name
 	}
 
+	if val, ok := step.Environment["CI_REPO_NAME"]; ok {
+		meta.Labels["repository"] = val
+	}
+	if val, ok := step.Environment["CI_PIPELINE_NUMBER"]; ok {
+		meta.Labels["pipeline_number"] = val
+	}
+
 	meta.Annotations = config.PodAnnotations
 	if meta.Annotations == nil {
 		meta.Annotations = make(map[string]string)
@@ -113,17 +120,49 @@ func stepLabel(step *types.Step) (string, error) {
 	return toDNSName(step.Name)
 }
 
-func podSpec(step *types.Step, config *config) (v1.PodSpec, error) {
+func podSpec(step *types.Step, config *config, labels map[string]string) (v1.PodSpec, error) {
 	var err error
-	spec := v1.PodSpec{
-		RestartPolicy:      v1.RestartPolicyNever,
-		ServiceAccountName: step.BackendOptions.Kubernetes.ServiceAccountName,
-		ImagePullSecrets:   imagePullSecretsReferences(config.ImagePullSecretNames),
-		HostAliases:        hostAliases(step.ExtraHosts),
-		NodeSelector:       nodeSelector(step.BackendOptions.Kubernetes.NodeSelector, step.Environment["CI_SYSTEM_PLATFORM"]),
-		Tolerations:        tolerations(step.BackendOptions.Kubernetes.Tolerations),
-		SecurityContext:    podSecurityContext(step.BackendOptions.Kubernetes.SecurityContext, config.SecurityContext),
+	spec := v1.PodSpec{}
+
+	repoLabel, hasLabelRepo := labels["repository"]
+	pipelineNumberLabel, hasLabelPipelineNumber := labels["pipeline_number"]
+
+	// force service and steps to run in the same node when rwx is false
+	// maybe in the future get theses values from backend configuration
+	if !config.StorageRwx && hasLabelRepo && hasLabelPipelineNumber {
+		spec.Affinity = &v1.Affinity{
+			PodAffinity: &v1.PodAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
+					{
+						LabelSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{
+								{
+									Key:      "repository",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{repoLabel},
+								},
+								{
+									Key:      "pipeline_number",
+									Operator: metav1.LabelSelectorOpIn,
+									Values:   []string{pipelineNumberLabel},
+								},
+							},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					},
+				},
+			},
+		}
 	}
+
+	spec.RestartPolicy = v1.RestartPolicyNever
+	spec.ServiceAccountName = step.BackendOptions.Kubernetes.ServiceAccountName
+	spec.ImagePullSecrets = imagePullSecretsReferences(config.ImagePullSecretNames)
+	spec.HostAliases = hostAliases(step.ExtraHosts)
+	spec.NodeSelector = nodeSelector(step.BackendOptions.Kubernetes.NodeSelector, step.Environment["CI_SYSTEM_PLATFORM"])
+	spec.Tolerations = tolerations(step.BackendOptions.Kubernetes.Tolerations)
+	spec.SecurityContext = podSecurityContext(step.BackendOptions.Kubernetes.SecurityContext, config.SecurityContext)
+
 	spec.Volumes, err = volumes(step.Volumes)
 	if err != nil {
 		return spec, err
@@ -190,6 +229,7 @@ func volume(name string) v1.Volume {
 		ClaimName: name,
 		ReadOnly:  false,
 	}
+
 	return v1.Volume{
 		Name: name,
 		VolumeSource: v1.VolumeSource{
