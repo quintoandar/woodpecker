@@ -31,8 +31,11 @@ import (
 )
 
 const (
-	StepLabel = "step"
-	podPrefix = "wp-"
+	StepLabel           = "step"
+	podPrefix           = "wp-"
+	PipelineNumberLabel = "pipeline_number"
+	RepositoryLabel     = "repository"
+	WorkflowNameLabel   = "workflow_name"
 )
 
 func mkPod(step *types.Step, config *config, podName, goos string) (*v1.Pod, error) {
@@ -43,7 +46,7 @@ func mkPod(step *types.Step, config *config, podName, goos string) (*v1.Pod, err
 		return nil, err
 	}
 
-	spec, err := podSpec(step, config, meta.Labels)
+	spec, err := podSpec(step, config, affinityLabels(step.Environment))
 	if err != nil {
 		return nil, err
 	}
@@ -93,11 +96,12 @@ func podMeta(step *types.Step, config *config, podName string) (metav1.ObjectMet
 		meta.Labels[ServiceLabel] = step.Name
 	}
 
-	if val, ok := step.Environment["CI_REPO_NAME"]; ok {
-		meta.Labels["repository"] = val
-	}
-	if val, ok := step.Environment["CI_PIPELINE_NUMBER"]; ok {
-		meta.Labels["pipeline_number"] = val
+	affinityLabels := affinityLabels(step.Environment)
+
+	if len(affinityLabels) > 0 && !config.StorageRwx {
+		meta.Labels[RepositoryLabel] = affinityLabels[RepositoryLabel]
+		meta.Labels[PipelineNumberLabel] = affinityLabels[PipelineNumberLabel]
+		meta.Labels[WorkflowNameLabel] = affinityLabels[WorkflowNameLabel]
 	}
 
 	meta.Annotations = config.PodAnnotations
@@ -120,39 +124,29 @@ func stepLabel(step *types.Step) (string, error) {
 	return toDNSName(step.Name)
 }
 
-func podSpec(step *types.Step, config *config, labels map[string]string) (v1.PodSpec, error) {
+func affinityLabels(env map[string]string) map[string]string {
+	affinityLabels := make(map[string]string)
+
+	if val, ok := env["CI_REPO_NAME"]; ok {
+		affinityLabels[RepositoryLabel] = val
+	}
+	if val, ok := env["CI_PIPELINE_NUMBER"]; ok {
+		affinityLabels[PipelineNumberLabel] = val
+	}
+	if val, ok := env["CI_WORKFLOW_NAME"]; ok {
+		affinityLabels[WorkflowNameLabel] = val
+	}
+	return affinityLabels
+}
+
+func podSpec(step *types.Step, config *config, affinityLabels map[string]string) (v1.PodSpec, error) {
 	var err error
 	spec := v1.PodSpec{}
 
-	repoLabel, hasLabelRepo := labels["repository"]
-	pipelineNumberLabel, hasLabelPipelineNumber := labels["pipeline_number"]
-
 	// force service and steps to run in the same node when rwx is false
 	// maybe in the future get theses values from backend configuration
-	if !config.StorageRwx && hasLabelRepo && hasLabelPipelineNumber {
-		spec.Affinity = &v1.Affinity{
-			PodAffinity: &v1.PodAffinity{
-				RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
-					{
-						LabelSelector: &metav1.LabelSelector{
-							MatchExpressions: []metav1.LabelSelectorRequirement{
-								{
-									Key:      "repository",
-									Operator: metav1.LabelSelectorOpIn,
-									Values:   []string{repoLabel},
-								},
-								{
-									Key:      "pipeline_number",
-									Operator: metav1.LabelSelectorOpIn,
-									Values:   []string{pipelineNumberLabel},
-								},
-							},
-						},
-						TopologyKey: "kubernetes.io/hostname",
-					},
-				},
-			},
-		}
+	if len(affinityLabels) > 0 && !config.StorageRwx {
+		spec.Affinity = podAffinity(affinityLabels)
 	}
 
 	spec.RestartPolicy = v1.RestartPolicyNever
@@ -208,6 +202,37 @@ func podContainer(step *types.Step, podName, goos string) (v1.Container, error) 
 	}
 
 	return container, nil
+}
+
+func podAffinity(affinityLabels map[string]string) *v1.Affinity {
+	return &v1.Affinity{
+		PodAffinity: &v1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{
+				{
+					LabelSelector: &metav1.LabelSelector{
+						MatchExpressions: []metav1.LabelSelectorRequirement{
+							{
+								Key:      RepositoryLabel,
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{affinityLabels[RepositoryLabel]},
+							},
+							{
+								Key:      PipelineNumberLabel,
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{affinityLabels[PipelineNumberLabel]},
+							},
+							{
+								Key:      WorkflowNameLabel,
+								Operator: metav1.LabelSelectorOpIn,
+								Values:   []string{affinityLabels[WorkflowNameLabel]},
+							},
+						},
+					},
+					TopologyKey: v1.LabelHostname,
+				},
+			},
+		},
+	}
 }
 
 func volumes(volumes []string) ([]v1.Volume, error) {
