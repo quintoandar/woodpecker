@@ -93,7 +93,7 @@ func podMeta(step *types.Step, config *config, podName string) (metav1.ObjectMet
 	}
 
 	if step.Type == types.StepTypeService {
-		meta.Labels[ServiceLabel] = step.Name
+		meta.Labels[ServiceLabel], _ = serviceName(step)
 	}
 
 	affinityLabels := affinityLabels(step.Environment)
