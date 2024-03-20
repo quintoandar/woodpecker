@@ -410,6 +410,9 @@ func PostPipeline(c *gin.Context) {
 	// make Deploy overridable
 	pl.Deploy = c.DefaultQuery("deploy_to", pl.Deploy)
 
+	// make Deploy task overridable
+	pl.DeployTask = c.DefaultQuery("deploy_task", pl.DeployTask)
+
 	// make Event overridable
 	if event, ok := c.GetQuery("event"); ok {
 		pl.Event = model.WebhookEvent(event)
