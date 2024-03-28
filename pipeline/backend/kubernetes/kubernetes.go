@@ -242,10 +242,11 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 
 	// TODO 5 seconds is against best practice, k3s didn't work otherwise
 	si := informers.NewSharedInformerFactoryWithOptions(e.client, 5*time.Second, informers.WithNamespace(e.config.Namespace))
-	if _, err := si.Core().V1().Pods().Informer().AddEventHandler(
+	if _, err := si.Core().V1().Pods().Informer().AddEventHandlerWithResyncPeriod(
 		cache.ResourceEventHandlerFuncs{
 			UpdateFunc: podUpdated,
 		},
+		defaultResyncDuration,
 	); err != nil {
 		return nil, err
 	}
