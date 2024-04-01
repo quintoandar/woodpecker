@@ -61,7 +61,6 @@ func isImagePullBackOffState(pod *v1.Pod) bool {
 			}
 		}
 	}
-
 	return false
 }
 
