@@ -131,6 +131,8 @@ func (r *Runtime) Run(runnerCtx context.Context) error {
 
 // Updates the current status of a step
 func (r *Runtime) traceStep(processState *backend.State, err error, step *backend.Step) error {
+	logger := r.MakeLogger()
+
 	if r.tracer == nil {
 		// no tracer nothing to trace :)
 		return nil
@@ -144,6 +146,9 @@ func (r *Runtime) traceStep(processState *backend.State, err error, step *backen
 			processState.OOMKilled = false
 			processState.ExitCode = 126 // command invoked cannot be executed.
 		}
+		logger.Debug().
+			Str("step", step.Name).
+			Msg("create a new process state")
 	}
 
 	state := new(State)
@@ -173,18 +178,21 @@ func (r *Runtime) execAll(steps []*backend.Step) <-chan error {
 			// Case the pipeline was already complete.
 			logger.Debug().
 				Str("step", step.Name).
+				Str("taskUUID", r.taskUUID).
 				Msg("prepare")
 
 			switch {
 			case r.err != nil && !step.OnFailure:
 				logger.Debug().
 					Str("step", step.Name).
+					Str("taskUUID", r.taskUUID).
 					Err(r.err).
 					Msgf("skipped due to OnFailure=%t", step.OnFailure)
 				return nil
 			case r.err == nil && !step.OnSuccess:
 				logger.Debug().
 					Str("step", step.Name).
+					Str("taskUUID", r.taskUUID).
 					Msgf("skipped due to OnSuccess=%t", step.OnSuccess)
 				return nil
 			}
@@ -200,12 +208,14 @@ func (r *Runtime) execAll(steps []*backend.Step) <-chan error {
 
 			logger.Debug().
 				Str("step", step.Name).
+				Str("taskUUID", r.taskUUID).
 				Msg("executing")
 
 			processState, err := r.exec(step)
 
 			logger.Debug().
 				Str("step", step.Name).
+				Str("taskUUID", r.taskUUID).
 				Msg("complete")
 
 			// Return the error after tracing it.
@@ -226,6 +236,8 @@ func (r *Runtime) execAll(steps []*backend.Step) <-chan error {
 
 // Executes the step and returns the state and error.
 func (r *Runtime) exec(step *backend.Step) (*backend.State, error) {
+	logger := r.MakeLogger()
+
 	if err := r.engine.StartStep(r.ctx, step, r.taskUUID); err != nil {
 		return nil, err
 	}
@@ -240,8 +252,6 @@ func (r *Runtime) exec(step *backend.Step) (*backend.State, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			logger := r.MakeLogger()
-
 			if err := r.logger(step, rc); err != nil {
 				logger.Error().Err(err).Msg("process logging failed")
 			}
@@ -264,6 +274,11 @@ func (r *Runtime) exec(step *backend.Step) (*backend.State, error) {
 		}
 		return nil, err
 	}
+
+	logger.Debug().
+		Str("step", step.Name).
+		Str("taskUUID", r.taskUUID).
+		Msgf("Got wait state: %v", waitState)
 
 	if err := r.engine.DestroyStep(r.ctx, step, r.taskUUID); err != nil {
 		return nil, err

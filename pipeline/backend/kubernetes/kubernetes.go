@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+
 	// To authenticate to GCP K8s clusters
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
@@ -217,7 +218,10 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 		return nil, err
 	}
 
-	log.Trace().Str("taskUUID", taskUUID).Msgf("waiting for pod: %s", podName)
+	log.Trace().
+		Str("taskUUID", taskUUID).
+		Str("step", step.Name).
+		Msgf("waiting for pod: %s", podName)
 
 	finished := make(chan bool)
 
@@ -257,6 +261,12 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 	// TODO Cancel on ctx.Done
 	<-finished
 
+	last := <-finished
+	log.Trace().
+		Str("taskUUID", taskUUID).
+		Str("step", step.Name).
+		Msgf("Pod has: %v", last)
+
 	pod, err := e.client.CoreV1().Pods(e.config.Namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
@@ -292,7 +302,10 @@ func (e *kube) TailStep(ctx context.Context, step *types.Step, taskUUID string) 
 		return nil, err
 	}
 
-	log.Trace().Str("taskUUID", taskUUID).Msgf("tail logs of pod: %s", podName)
+	log.Trace().
+		Str("taskUUID", taskUUID).
+		Str("step", step.Name).
+		Msgf("tail logs of pod: %s", podName)
 
 	up := make(chan bool)
 
@@ -304,6 +317,9 @@ func (e *kube) TailStep(ctx context.Context, step *types.Step, taskUUID string) 
 		}
 
 		if pod.Name == podName {
+			if isImagePullBackOffState(pod) {
+				up <- true
+			}
 			switch pod.Status.Phase {
 			case v1.PodRunning, v1.PodSucceeded, v1.PodFailed:
 				up <- true
