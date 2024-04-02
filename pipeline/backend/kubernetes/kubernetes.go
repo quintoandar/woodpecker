@@ -322,9 +322,7 @@ func (e *kube) TailStep(ctx context.Context, step *types.Step, taskUUID string) 
 			if isImagePullBackOffState(pod) {
 				up <- true
 			}
-			if isCompleted(pod) {
-				up <- true
-			}
+
 			switch pod.Status.Phase {
 			case v1.PodRunning, v1.PodSucceeded, v1.PodFailed:
 				up <- true
