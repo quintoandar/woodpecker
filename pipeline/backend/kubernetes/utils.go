@@ -66,8 +66,10 @@ func isImagePullBackOffState(pod *v1.Pod) bool {
 
 func isCompleted(pod *v1.Pod) bool {
 	for _, containerState := range pod.Status.ContainerStatuses {
-		if containerState.State.Terminated.Reason == "Completed" {
-			return true
+		if containerState.State.Terminated != nil {
+			if containerState.State.Terminated.Reason == "Completed" {
+				return true
+			}
 		}
 	}
 	return false
