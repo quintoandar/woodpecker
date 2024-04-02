@@ -64,6 +64,15 @@ func isImagePullBackOffState(pod *v1.Pod) bool {
 	return false
 }
 
+func isCompleted(pod *v1.Pod) bool {
+	for _, containerState := range pod.Status.ContainerStatuses {
+		if containerState.State.Terminated.Reason == "Completed" {
+			return true
+		}
+	}
+	return false
+}
+
 // getClientOutOfCluster returns a k8s clientset to the request from outside of cluster
 func getClientOutOfCluster() (kubernetes.Interface, error) {
 	kubeConfigPath := os.Getenv("KUBECONFIG")
