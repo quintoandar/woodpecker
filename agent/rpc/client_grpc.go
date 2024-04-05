@@ -339,7 +339,6 @@ func (c *client) Log(ctx context.Context, logEntry *rpc.LogEntry) (err error) {
 			codes.Aborted,
 			codes.DataLoss,
 			codes.DeadlineExceeded,
-			codes.Internal,
 			codes.Unavailable:
 			// non-fatal errors
 		default:
