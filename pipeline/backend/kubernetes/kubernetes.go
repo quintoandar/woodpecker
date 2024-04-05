@@ -373,8 +373,20 @@ func (e *kube) TailStep(ctx context.Context, step *types.Step, taskUUID string) 
 		defer wc.Close()
 		defer rc.Close()
 
-		_, err = io.CopyBuffer(wc, logs, buf)
+		size, err := io.CopyBuffer(wc, logs, buf)
+
+		log.Trace().
+			Str("taskUUID", taskUUID).
+			Str("step", step.Name).
+			Str("pod", podName).
+			Msgf("Size log copied: %v", size)
+
 		if err != nil {
+			log.Error().
+				Str("taskUUID", taskUUID).
+				Str("step", step.Name).
+				Str("pod", podName).
+				Msgf("Failed tail logs of pod: %v", err)
 			return
 		}
 	}()
