@@ -17,6 +17,7 @@ package pipeline
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -244,18 +245,30 @@ func (r *Runtime) exec(step *backend.Step) (*backend.State, error) {
 
 	var wg sync.WaitGroup
 	if r.logger != nil {
-		rc, err := r.engine.TailStep(r.ctx, step, r.taskUUID)
+		logs, err := r.engine.TailStep(r.ctx, step, r.taskUUID)
 		if err != nil {
 			return nil, err
 		}
+		defer logs.Close()
+
+		rc, wc := io.Pipe()
+		defer wc.Close()
+		defer rc.Close()
+
+		go func() {
+			if _, err = io.Copy(wc, logs); err != nil {
+				logger.Error().Err(err).Msg("failed to copy logs from backend")
+				return
+			}
+		}()
 
 		wg.Add(1)
+
 		go func() {
 			defer wg.Done()
 			if err := r.logger(step, rc); err != nil {
 				logger.Error().Err(err).Msg("process logging failed")
 			}
-			_ = rc.Close()
 		}()
 	}
 
