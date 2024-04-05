@@ -32,6 +32,7 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
+
 	// To authenticate to GCP K8s clusters
 	_ "k8s.io/client-go/plugin/pkg/client/auth/gcp"
 	"k8s.io/client-go/rest"
@@ -366,13 +367,13 @@ func (e *kube) TailStep(ctx context.Context, step *types.Step, taskUUID string) 
 		return nil, err
 	}
 	rc, wc := io.Pipe()
-
+	buf := make([]byte, 2048)
 	go func() {
 		defer logs.Close()
 		defer wc.Close()
 		defer rc.Close()
 
-		_, err = io.Copy(wc, logs)
+		_, err = io.CopyBuffer(wc, logs, buf)
 		if err != nil {
 			return
 		}
