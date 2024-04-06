@@ -8,6 +8,9 @@
         <InputField v-slot="{ id }" :label="$t('repo.deploy_pipeline.enter_target')">
           <TextField :id="id" v-model="payload.environment" required />
         </InputField>
+        <InputField v-slot="{ id }" :label="$t('repo.deploy_pipeline.enter_task')">
+          <TextField :id="id" v-model="payload.task" />
+        </InputField>
         <InputField v-slot="{ id }" :label="$t('repo.deploy_pipeline.variables.title')">
           <span class="text-sm text-wp-text-alt-100 mb-2">{{ $t('repo.deploy_pipeline.variables.desc') }}</span>
           <div class="flex flex-col gap-2">
@@ -75,10 +78,26 @@ const repo = inject('repo');
 
 const router = useRouter();
 
-const payload = ref<{ id: string; environment: string; variables: Record<string, string> }>({
+const payload = ref<{ id: string; environment: string; task: string; variables: { name: string; value: string }[] }>({
   id: '',
   environment: '',
-  variables: {},
+  task: '',
+  variables: [
+    {
+      name: '',
+      value: '',
+    },
+  ],
+});
+
+const pipelineOptions = computed(() => {
+  const variables = Object.fromEntries(
+    payload.value.variables.filter((e) => e.name !== '').map((item) => [item.name, item.value]),
+  );
+  return {
+    ...payload.value,
+    variables,
+  };
 });
 const newPipelineVariable = ref<{ name: string; value: string }>({ name: '', value: '' });
 

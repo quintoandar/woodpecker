@@ -16,11 +16,18 @@
     "activity": "Atividade",
     "add": "Adicionar repositório",
     "deploy_pipeline": {
-      "variables": {
-        "add": "Adicionar variável",
-        "name": "Nome da variável",
-        "value": "Valor da variável"
-      }
+        "variables": {
+            "add": "Adicionar variável",
+            "name": "Nome da variável",
+            "value": "Valor da variável",
+            "title": "Variáveis adicionais do pipeline",
+            "desc": "Especifique variáveis adicionais a serem usadas em seu pipeline. As variáveis com o mesmo nome serão substituídas.",
+            "delete": "Excluir variável"
+        },
+        "title": "Acionar o evento de implantação para o pipeline atual #{pipelineId}",
+        "enter_target": "Ambiente de implantação de destino",
+        "enter_task": "Tarefa de implantação",
+        "trigger": "Implementar"
     },
     "enable": {
       "enable": "Habilitar",
