@@ -16,7 +16,7 @@ package main
 
 import (
 	"os"
-
+	_ "net/http/pprof"
 	_ "github.com/joho/godotenv/autoload"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
