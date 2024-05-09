@@ -263,12 +263,6 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 	// TODO Cancel on ctx.Done
 	<-finished
 
-	last := <-finished
-	log.Trace().
-		Str("taskUUID", taskUUID).
-		Str("step", step.Name).
-		Msgf("Pod has: %v", last)
-
 	pod, err := e.client.CoreV1().Pods(e.config.Namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
