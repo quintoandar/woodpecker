@@ -217,12 +217,10 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 		return nil, err
 	}
 
-	log := log.With().
+	log.Trace().
 		Str("taskUUID", taskUUID).
 		Str("step", step.Name).
-		Logger()
-
-	log.Trace().Msgf("waiting for pod: %s", podName)
+		Msgf("waiting for pod: %s", podName)
 
 	finished := make(chan bool)
 
@@ -233,28 +231,34 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 			return
 		}
 
-		if pod.Name != podName {
-			return
-		}
+		if pod.Name == podName {
+			if isImagePullBackOffState(pod) {
+				finished <- true
+			}
+			if isCompleted(pod) {
+				finished <- true
+			}
 
-		if isImagePullBackOffState(pod) || isCompleted(pod) || pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodUnknown {
-			finished <- true
+			switch pod.Status.Phase {
+			case v1.PodSucceeded, v1.PodFailed, v1.PodUnknown:
+				finished <- true
+			}
 		}
 	}
 
+	// TODO 5 seconds is against best practice, k3s didn't work otherwise
 	si := informers.NewSharedInformerFactoryWithOptions(e.client, 5*time.Second, informers.WithNamespace(e.config.Namespace))
-	podInformer := si.Core().V1().Pods().Informer()
-
-	if _, err := podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: podUpdated,
-	}); err != nil {
+	if _, err := si.Core().V1().Pods().Informer().AddEventHandler(
+		cache.ResourceEventHandlerFuncs{
+			UpdateFunc: podUpdated,
+		},
+	); err != nil {
 		return nil, err
 	}
 
 	stop := make(chan struct{})
+	si.Start(stop)
 	defer close(stop)
-
-	go podInformer.Run(stop)
 
 	select {
 	case <-ctx.Done():
@@ -281,11 +285,13 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 		return nil, fmt.Errorf("no terminated state found for container %s/%s", pod.Name, cs.Name)
 	}
 
-	return &types.State{
+	bs := &types.State{
 		ExitCode:  int(cs.State.Terminated.ExitCode),
 		Exited:    true,
 		OOMKilled: false,
-	}, nil
+	}
+
+	return bs, nil
 }
 
 // Tail the pipeline step logs.
