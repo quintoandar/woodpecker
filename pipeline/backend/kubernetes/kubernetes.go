@@ -231,22 +231,15 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 			return
 		}
 
-		if pod.Name == podName {
-			if isImagePullBackOffState(pod) {
-				finished <- true
-			}
-			if isCompleted(pod) {
-				finished <- true
-			}
+		if pod.Name != podName {
+			return
+		}
 
-			switch pod.Status.Phase {
-			case v1.PodSucceeded, v1.PodFailed, v1.PodUnknown:
-				finished <- true
-			}
+		if isImagePullBackOffState(pod) || isCompleted(pod) || pod.Status.Phase == v1.PodSucceeded || pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodUnknown {
+			finished <- true
 		}
 	}
 
-	// TODO 5 seconds is against best practice, k3s didn't work otherwise
 	si := informers.NewSharedInformerFactoryWithOptions(e.client, 5*time.Second, informers.WithNamespace(e.config.Namespace))
 	if _, err := si.Core().V1().Pods().Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
@@ -260,11 +253,7 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 	si.Start(stop)
 	defer close(stop)
 
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-finished:
-	}
+	<-finished
 
 	pod, err := e.client.CoreV1().Pods(e.config.Namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
