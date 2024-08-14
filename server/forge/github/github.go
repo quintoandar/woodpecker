@@ -28,7 +28,6 @@ import (
 
 	"github.com/gofri/go-github-ratelimit/github_ratelimit"
 	"github.com/google/go-github/v63/github"
-
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 
