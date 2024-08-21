@@ -116,7 +116,7 @@ func (c *client) Login(ctx context.Context, req *forge_types.OAuthRequest) (*mod
 		return nil, redirectURL, err
 	}
 
-	client := c.newClientToken(ctx, token.AccessToken)
+	client := c.newClientToken(token.AccessToken)
 	user, _, err := client.Users.Get(ctx, "")
 	if err != nil {
 		return nil, redirectURL, err
@@ -144,7 +144,7 @@ func (c *client) Login(ctx context.Context, req *forge_types.OAuthRequest) (*mod
 
 // Auth returns the GitHub user login for the given access token.
 func (c *client) Auth(ctx context.Context, token, _ string) (string, error) {
-	client := c.newClientToken(ctx, token)
+	client := c.newClientToken(token)
 	user, _, err := client.Users.Get(ctx, "")
 	if err != nil {
 		return "", err
@@ -319,7 +319,7 @@ func (c *client) Dir(ctx context.Context, u *model.User, r *model.Repo, b *model
 
 func (c *client) PullRequests(ctx context.Context, u *model.User, r *model.Repo, p *model.ListOptions) ([]*model.PullRequest, error) {
 	token := common.UserToken(ctx, r, u)
-	client := c.newClientToken(ctx, token)
+	client := c.newClientToken(token)
 
 	pullRequests, _, err := client.PullRequests.List(ctx, r.Owner, r.Name, &github.PullRequestListOptions{
 		ListOptions: github.ListOptions{Page: p.Page, PerPage: p.PerPage},
@@ -459,21 +459,19 @@ func (c *client) newConfig() *oauth2.Config {
 }
 
 // newClientToken returns the GitHub oauth2 client.
-func (c *client) newClientToken(ctx context.Context, token string) *github.Client {
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
-	tc := oauth2.NewClient(ctx, ts)
+func (c *client) newClientToken(token string) *github.Client {
+	var base http.RoundTripper
 	if c.SkipVerify {
-		tp, _ := tc.Transport.(*oauth2.Transport)
-		tp.Base = &http.Transport{
+		base = &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			TLSClientConfig: &tls.Config{
 				InsecureSkipVerify: true,
 			},
 		}
 	}
-	client := github.NewClient(tc)
+
+	rateLimiter, _ := github_ratelimit.NewRateLimitWaiterClient(base)
+	client := github.NewClient(rateLimiter).WithAuthToken(token)
 	client.BaseURL, _ = url.Parse(c.API)
 	return client
 }
@@ -573,7 +571,7 @@ func (c *client) Activate(ctx context.Context, u *model.User, r *model.Repo, lin
 // Branches returns the names of all branches for the named repository.
 func (c *client) Branches(ctx context.Context, u *model.User, r *model.Repo, p *model.ListOptions) ([]string, error) {
 	token := common.UserToken(ctx, r, u)
-	client := c.newClientToken(ctx, token)
+	client := c.newClientToken(token)
 
 	githubBranches, _, err := client.Repositories.ListBranches(ctx, r.Owner, r.Name, &github.BranchListOptions{
 		ListOptions: github.ListOptions{Page: p.Page, PerPage: p.PerPage},
@@ -592,7 +590,7 @@ func (c *client) Branches(ctx context.Context, u *model.User, r *model.Repo, p *
 // BranchHead returns the sha of the head (latest commit) of the specified branch.
 func (c *client) BranchHead(ctx context.Context, u *model.User, r *model.Repo, branch string) (*model.Commit, error) {
 	token := common.UserToken(ctx, r, u)
-	b, _, err := c.newClientToken(ctx, token).Repositories.GetBranch(ctx, r.Owner, r.Name, branch, 1)
+	b, _, err := c.newClientToken(token).Repositories.GetBranch(ctx, r.Owner, r.Name, branch, 1)
 	if err != nil {
 		return nil, err
 	}
