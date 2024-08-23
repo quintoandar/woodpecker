@@ -240,7 +240,7 @@ func PostHook(c *gin.Context) {
 	}
 
 	//
-	// 6. Finally create a pipeline. Do it assynchronously to avoid blocking the webhook
+	// 6. Finally create a pipeline. Do it asynchronously to avoid blocking the webhook
 	//
 	go func() {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), pipelineCreationTimeout)
