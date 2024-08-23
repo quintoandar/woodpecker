@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/franela/goblin"
 	"github.com/gin-gonic/gin"
@@ -78,6 +80,11 @@ func TestHook(t *testing.T) {
 				},
 			}
 
+			// Since the hook calls a go routine to create the pipeline, we need to use a wait
+			// group to wait for the go routine to finish before we can assert the results.
+			var wg sync.WaitGroup
+			wg.Add(1)
+
 			_manager.On("ForgeFromRepo", repo).Return(_forge, nil)
 			_forge.On("Hook", mock.Anything, mock.Anything).Return(repo, pipeline, nil)
 			_store.On("GetRepo", repo.ID).Return(repo, nil)
@@ -93,12 +100,26 @@ func TestHook(t *testing.T) {
 			_manager.On("RegistryServiceFromRepo", repo).Return(_registryService)
 			_registryService.On("RegistryListPipeline", repo, mock.Anything).Return(nil, nil)
 			_manager.On("EnvironmentService").Return(nil)
-			_store.On("DeletePipeline", mock.Anything).Return(nil)
+
+			_store.On("DeletePipeline", mock.Anything).Run(func(_ mock.Arguments) {
+				wg.Done()
+			}).Return(nil)
 
 			api.PostHook(c)
 
-			assert.Equal(g, http.StatusNoContent, c.Writer.Status())
-			assert.Equal(g, "true", w.Header().Get("Pipeline-Filtered"))
+			done := make(chan struct{})
+			go func() {
+				wg.Wait()
+				close(done)
+			}()
+
+			select {
+			case <-time.After(5 * time.Second):
+				g.Fail("timeout")
+			case <-done:
+			}
+
+			assert.Equal(g, http.StatusAccepted, c.Writer.Status())
 		})
 	})
 }
