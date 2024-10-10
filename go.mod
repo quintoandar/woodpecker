@@ -31,6 +31,7 @@ require (
 	github.com/gitsight/go-vcsurl v1.0.1
 	github.com/go-ap/httpsig v0.0.0-20221203064646-3647b4d88fdf
 	github.com/go-sql-driver/mysql v1.8.1
+	github.com/gofri/go-github-ratelimit v1.1.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/go-github/v63 v63.0.0
 	github.com/google/tink/go v1.7.0
@@ -125,7 +126,6 @@ require (
 	github.com/go-playground/validator/v10 v10.20.0 // indirect
 	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
-	github.com/gofri/go-github-ratelimit v1.1.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect

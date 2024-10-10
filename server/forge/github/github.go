@@ -445,6 +445,7 @@ func (c *client) newClientToken(token string) *github.Client {
 		base,
 		github_ratelimit.WithLimitDetectedCallback(
 			func(callback *github_ratelimit.CallbackContext) {
+				//nolint:gosimple
 				duration := callback.SleepUntil.Sub(time.Now())
 				log.Warn().Msgf("Hit GitHub secondary rate limit (sleeping for %s)", duration)
 			}),
