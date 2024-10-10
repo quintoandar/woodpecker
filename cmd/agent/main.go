@@ -16,9 +16,9 @@ package main
 
 import (
 	"context"
-	"github.com/rs/zerolog/log"
 	_ "net/http/pprof"
 
+	"github.com/rs/zerolog/log"
 	"go.woodpecker-ci.org/woodpecker/v3/cmd/agent/core"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/docker"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/kubernetes"
