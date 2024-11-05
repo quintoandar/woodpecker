@@ -17,10 +17,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -92,6 +94,8 @@ func BlockTilQueueHasRunningItem(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+const pipelineCreationTimeout = 2 * time.Minute
 
 // PostHook
 //
@@ -236,15 +240,17 @@ func PostHook(c *gin.Context) {
 	}
 
 	//
-	// 6. Finally create a pipeline
+	// 6. Finally create a pipeline. Do it asynchronously to avoid blocking the webhook
 	//
+	go func() {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), pipelineCreationTimeout)
+		defer cancel()
 
-	pl, err := pipeline.Create(c, _store, repo, pipelineFromForge)
-	if err != nil {
-		handlePipelineErr(c, err)
-	} else {
-		c.JSON(http.StatusOK, pl)
-	}
+		_, err := pipeline.Create(ctx, _store, repo, pipelineFromForge)
+		log.Err(err).Msg("error creating pipeline")
+	}()
+
+	c.JSON(http.StatusAccepted, nil)
 }
 
 func getRepoFromToken(store store.Store, t *token.Token) (*model.Repo, error) {
