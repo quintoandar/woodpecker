@@ -12,7 +12,8 @@ variables:
   # cspell:words woodpeckerbot netgo
 
   # vars used on push / tag events only
-  - publish_logins: &publish_logins # Default DockerHub login
+  - publish_logins: &publish_logins
+                                    # Default DockerHub login
       - registry: https://index.docker.io/v1/
         username: woodpeckerbot
         password:
@@ -25,7 +26,8 @@ variables:
   - &publish_repos_server 'woodpeckerci/woodpecker-server,quay.io/woodpeckerci/woodpecker-server'
   - &publish_repos_agent 'woodpeckerci/woodpecker-agent,quay.io/woodpeckerci/woodpecker-agent'
   - &publish_repos_cli 'woodpeckerci/woodpecker-cli,quay.io/woodpeckerci/woodpecker-cli'
-  - path: &when_path # web source code
+  - path: &when_path
+                     # web source code
       - 'web/**'
       # api source code
       - 'server/api/**'
@@ -119,7 +121,8 @@ steps:
       - apt install -y tree
       - make cross-compile-server
     environment:
-      PLATFORMS: linux|arm/v7;linux|arm64/v8;linux|amd64;linux|ppc64le;linux|riscv64
+      PLATFORMS: 
+        linux|arm/v7;linux|arm64/v8;linux|amd64;linux|ppc64le;linux|riscv64
       TAGS: sqlite sqlite_unlock_notify netgo
     when:
       branch:
