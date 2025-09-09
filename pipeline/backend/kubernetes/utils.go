@@ -24,6 +24,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	client_cmd "k8s.io/client-go/tools/clientcmd"
+
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 )
 
 var (
@@ -65,6 +67,18 @@ func isImagePullBackOffState(pod *v1.Pod) bool {
 	return false
 }
 
+func isInvalidImageName(pod *v1.Pod) bool {
+	for _, containerState := range pod.Status.ContainerStatuses {
+		if containerState.State.Waiting != nil {
+			if containerState.State.Waiting.Reason == "InvalidImageName" {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // getClientOutOfCluster returns a k8s client set to the request from outside of cluster.
 func getClientOutOfCluster() (kubernetes.Interface, error) {
 	kubeConfigPath := os.Getenv("KUBECONFIG") // cspell:words KUBECONFIG
@@ -81,7 +95,7 @@ func getClientOutOfCluster() (kubernetes.Interface, error) {
 	return kubernetes.NewForConfig(config)
 }
 
-// getClient returns a k8s client set to the request from inside of cluster.
+// getClientInsideOfCluster returns a k8s client set to the request from inside of cluster.
 func getClientInsideOfCluster() (kubernetes.Interface, error) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -89,6 +103,10 @@ func getClientInsideOfCluster() (kubernetes.Interface, error) {
 	}
 
 	return kubernetes.NewForConfig(config)
+}
+
+func isService(step *types.Step) bool {
+	return step.Type == types.StepTypeService || (step.Detached && dnsPattern.FindStringIndex(step.Name) != nil)
 }
 
 func newBool(val bool) *bool {

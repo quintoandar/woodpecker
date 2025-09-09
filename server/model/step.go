@@ -36,10 +36,10 @@ type Step struct {
 	Error      string      `json:"error,omitempty"      xorm:"TEXT 'error'"`
 	Failure    string      `json:"-"                    xorm:"failure"`
 	ExitCode   int         `json:"exit_code"            xorm:"exit_code"`
-	Started    int64       `json:"start_time,omitempty" xorm:"started"`
-	Finished   int64       `json:"end_time,omitempty"   xorm:"stopped"`
+	Started    int64       `json:"started,omitempty"    xorm:"started"`
+	Finished   int64       `json:"finished,omitempty"   xorm:"finished"`
 	Type       StepType    `json:"type,omitempty"       xorm:"type"`
-} //	@name Step
+} //	@name	Step
 
 // TableName return database table name for xorm.
 func (Step) TableName() string {
@@ -57,7 +57,7 @@ func (p *Step) Failing() bool {
 }
 
 // StepType identifies the type of step.
-type StepType string //	@name StepType
+type StepType string //	@name	StepType
 
 const (
 	StepTypeClone    StepType = "clone"

@@ -1,6 +1,7 @@
 import { shallowMount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
-import { watch, type Ref } from 'vue';
+import { watch } from 'vue';
+import type { Ref } from 'vue';
 
 import { usePagination } from './usePaginate';
 
@@ -18,11 +19,11 @@ async function waitForState<T>(ref: Ref<T>, expected: T): Promise<void> {
   });
 }
 
-// TODO enable again with eslint-plugin-promise eslint-disable-next-line promise/prefer-await-to-callbacks
+// eslint-disable-next-line promise/prefer-await-to-callbacks
 export const mountComposition = (cb: () => void) => {
   const wrapper = shallowMount({
     setup() {
-      // TODO enable again with eslint-plugin-promise eslint-disable-next-line promise/prefer-await-to-callbacks
+      // eslint-disable-next-line promise/prefer-await-to-callbacks
       cb();
       return {};
     },
@@ -48,6 +49,7 @@ describe('usePaginate', () => {
       usePaginationComposition = usePagination<{ name: string }>(
         async (page) => repoSecrets[page - 1],
         () => true,
+        { pageSize: 3 },
       );
     });
     await waitForState(usePaginationComposition.loading, true);
@@ -63,6 +65,7 @@ describe('usePaginate', () => {
       usePaginationComposition = usePagination<{ name: string }>(
         async (page) => repoSecrets[page - 1],
         () => true,
+        { pageSize: 3 },
       );
     });
     await waitForState(usePaginationComposition.loading, true);
@@ -86,7 +89,7 @@ describe('usePaginate', () => {
           return orgSecrets[page - 1];
         },
         () => true,
-        { each: ['repo', 'org'] },
+        { each: ['repo', 'org'], pageSize: 3 },
       );
     });
     await waitForState(usePaginationComposition.loading, true);
@@ -111,6 +114,7 @@ describe('usePaginate', () => {
       usePaginationComposition = usePagination<{ name: string }>(
         async (page) => repoSecrets[page - 1],
         () => true,
+        { pageSize: 3 },
       );
     });
     await waitForState(usePaginationComposition.loading, true);
@@ -132,6 +136,7 @@ describe('usePaginate', () => {
       usePaginationComposition = usePagination<{ name: string }>(
         async (page) => repoSecrets[page - 1],
         () => true,
+        { pageSize: 3 },
       );
     });
     await waitForState(usePaginationComposition.loading, true);

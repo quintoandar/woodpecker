@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/frontend/yaml/linter/schema"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/linter/schema"
 )
 
 func TestSchema(t *testing.T) {
@@ -32,18 +32,6 @@ func TestSchema(t *testing.T) {
 		testFile string
 		fail     bool
 	}{
-		{
-			name:     "Branches",
-			testFile: ".woodpecker/test-branches.yaml",
-		},
-		{
-			name:     "Branches Array",
-			testFile: ".woodpecker/test-branches-array.yaml",
-		},
-		{
-			name:     "Branches exclude & include",
-			testFile: ".woodpecker/test-branches-exclude-include.yaml",
-		},
 		{
 			name:     "Clone",
 			testFile: ".woodpecker/test-clone.yaml",
@@ -85,16 +73,16 @@ func TestSchema(t *testing.T) {
 			testFile: ".woodpecker/test-workspace.yaml",
 		},
 		{
-			name:     "Platform",
-			testFile: ".woodpecker/test-platform.yaml",
-		},
-		{
 			name:     "Labels",
 			testFile: ".woodpecker/test-labels.yaml",
 		},
 		{
 			name:     "Map and Sequence Merge", // https://woodpecker-ci.org/docs/next/usage/advanced-yaml-syntax
 			testFile: ".woodpecker/test-merge-map-and-sequence.yaml",
+		},
+		{
+			name:     "Backend options",
+			testFile: ".woodpecker/test-backend-options.yaml",
 		},
 		{
 			name:     "Broken Config",

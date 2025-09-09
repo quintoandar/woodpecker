@@ -29,21 +29,20 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 
-	"go.woodpecker-ci.org/woodpecker/v2/server"
-	"go.woodpecker-ci.org/woodpecker/v2/server/cache"
-	"go.woodpecker-ci.org/woodpecker/v2/server/forge/setup"
-	"go.woodpecker-ci.org/woodpecker/v2/server/logging"
-	"go.woodpecker-ci.org/woodpecker/v2/server/model"
-	"go.woodpecker-ci.org/woodpecker/v2/server/pubsub"
-	"go.woodpecker-ci.org/woodpecker/v2/server/queue"
-	"go.woodpecker-ci.org/woodpecker/v2/server/services"
-	logService "go.woodpecker-ci.org/woodpecker/v2/server/services/log"
-	"go.woodpecker-ci.org/woodpecker/v2/server/services/log/file"
-	"go.woodpecker-ci.org/woodpecker/v2/server/services/permissions"
-	"go.woodpecker-ci.org/woodpecker/v2/server/store"
-	"go.woodpecker-ci.org/woodpecker/v2/server/store/datastore"
-	"go.woodpecker-ci.org/woodpecker/v2/server/store/types"
-	"go.woodpecker-ci.org/woodpecker/v2/shared/constant"
+	"go.woodpecker-ci.org/woodpecker/v3/server"
+	"go.woodpecker-ci.org/woodpecker/v3/server/cache"
+	"go.woodpecker-ci.org/woodpecker/v3/server/forge/setup"
+	"go.woodpecker-ci.org/woodpecker/v3/server/logging"
+	"go.woodpecker-ci.org/woodpecker/v3/server/model"
+	"go.woodpecker-ci.org/woodpecker/v3/server/pubsub"
+	"go.woodpecker-ci.org/woodpecker/v3/server/queue"
+	"go.woodpecker-ci.org/woodpecker/v3/server/services"
+	logService "go.woodpecker-ci.org/woodpecker/v3/server/services/log"
+	"go.woodpecker-ci.org/woodpecker/v3/server/services/log/file"
+	"go.woodpecker-ci.org/woodpecker/v3/server/services/permissions"
+	"go.woodpecker-ci.org/woodpecker/v3/server/store"
+	"go.woodpecker-ci.org/woodpecker/v3/server/store/datastore"
+	"go.woodpecker-ci.org/woodpecker/v3/server/store/types"
 )
 
 const (
@@ -52,11 +51,14 @@ const (
 )
 
 func setupStore(ctx context.Context, c *cli.Command) (store.Store, error) {
-	datasource := c.String("datasource")
-	driver := c.String("driver")
+	datasource := c.String("db-datasource")
+	driver := c.String("db-driver")
 	xorm := store.XORM{
-		Log:     c.Bool("log-xorm"),
-		ShowSQL: c.Bool("log-xorm-sql"),
+		Log:             c.Bool("db-log"),
+		ShowSQL:         c.Bool("db-log-sql"),
+		MaxOpenConns:    c.Int("db-max-open-connections"),
+		MaxIdleConns:    c.Int("db-max-idle-connections"),
+		ConnMaxLifetime: c.Duration("db-max-connection-timeout"),
 	}
 
 	if driver == "sqlite3" {
@@ -82,10 +84,14 @@ func setupStore(ctx context.Context, c *cli.Command) (store.Store, error) {
 		Config: datasource,
 		XORM:   xorm,
 	}
-	log.Trace().Msgf("setup datastore: %#v", *opts)
+	log.Debug().Str("driver", driver).Any("xorm", xorm).Msg("setting up datastore")
 	store, err := datastore.NewEngine(opts)
 	if err != nil {
 		return nil, fmt.Errorf("could not open datastore: %w", err)
+	}
+
+	if err = store.Ping(); err != nil {
+		return nil, err
 	}
 
 	if err := store.Migrate(ctx, c.Bool("migrations-allow-long")); err != nil {
@@ -104,8 +110,11 @@ func checkSqliteFileExist(path string) error {
 	return err
 }
 
-func setupQueue(ctx context.Context, s store.Store) queue.Queue {
-	return queue.WithTaskStore(ctx, queue.New(ctx), s)
+func setupQueue(ctx context.Context, s store.Store) (queue.Queue, error) {
+	return queue.New(ctx, queue.Config{
+		Backend: queue.TypeMemory,
+		Store:   s,
+	})
 }
 
 func setupMembershipService(_ context.Context, _store store.Store) cache.MembershipService {
@@ -144,47 +153,69 @@ func setupJWTSecret(_store store.Store) (string, error) {
 	return jwtSecret, nil
 }
 
-func setupEvilGlobals(ctx context.Context, c *cli.Command, s store.Store) error {
+func setupEvilGlobals(ctx context.Context, c *cli.Command, s store.Store) (err error) {
 	// services
-	server.Config.Services.Queue = setupQueue(ctx, s)
 	server.Config.Services.Logs = logging.New()
 	server.Config.Services.Pubsub = pubsub.New()
 	server.Config.Services.Membership = setupMembershipService(ctx, s)
-	serviceManager, err := services.NewManager(c, s, setup.Forge)
+	server.Config.Services.Queue, err = setupQueue(ctx, s)
+	if err != nil {
+		return fmt.Errorf("could not setup queue: %w", err)
+	}
+	server.Config.Services.Manager, err = services.NewManager(c, s, setup.Forge)
 	if err != nil {
 		return fmt.Errorf("could not setup service manager: %w", err)
 	}
-	server.Config.Services.Manager = serviceManager
-
 	server.Config.Services.LogStore, err = setupLogStore(c, s)
 	if err != nil {
 		return fmt.Errorf("could not setup log store: %w", err)
 	}
 
+	// agents
+	server.Config.Agent.DisableUserRegisteredAgentRegistration = c.Bool("disable-user-agent-registration")
+
 	// authentication
 	server.Config.Pipeline.AuthenticatePublicRepos = c.Bool("authenticate-public-repos")
 
+	// Pull requests
+	server.Config.Pipeline.DefaultAllowPullRequests = c.Bool("default-allow-pull-requests")
+
+	// Approval mode
+	approvalMode := model.ApprovalMode(c.String("default-approval-mode"))
+	if !approvalMode.Valid() {
+		return fmt.Errorf("approval mode %s is not valid", approvalMode)
+	}
+	server.Config.Pipeline.DefaultApprovalMode = approvalMode
+
 	// Cloning
-	server.Config.Pipeline.DefaultCloneImage = c.String("default-clone-image")
-	constant.TrustedCloneImages = append(constant.TrustedCloneImages, server.Config.Pipeline.DefaultCloneImage)
+	server.Config.Pipeline.DefaultClonePlugin = c.String("default-clone-plugin")
+	server.Config.Pipeline.TrustedClonePlugins = c.StringSlice("plugins-trusted-clone")
+	server.Config.Pipeline.TrustedClonePlugins = append(server.Config.Pipeline.TrustedClonePlugins, server.Config.Pipeline.DefaultClonePlugin)
 
 	// Execution
 	_events := c.StringSlice("default-cancel-previous-pipeline-events")
 	events := make([]model.WebhookEvent, 0, len(_events))
 	for _, v := range _events {
-		events = append(events, model.WebhookEvent(v))
+		e := model.WebhookEvent(v)
+		if err := e.Validate(); err != nil {
+			return err
+		}
+		events = append(events, e)
 	}
 	server.Config.Pipeline.DefaultCancelPreviousPipelineEvents = events
-	server.Config.Pipeline.DefaultTimeout = c.Int("default-pipeline-timeout")
-	server.Config.Pipeline.MaxTimeout = c.Int("max-pipeline-timeout")
+	server.Config.Pipeline.DefaultTimeout = c.Int64("default-pipeline-timeout")
+	server.Config.Pipeline.MaxTimeout = c.Int64("max-pipeline-timeout")
 
-	// limits
-	server.Config.Pipeline.Limits.MemSwapLimit = c.Int("limit-mem-swap")
-	server.Config.Pipeline.Limits.MemLimit = c.Int("limit-mem")
-	server.Config.Pipeline.Limits.ShmSize = c.Int("limit-shm-size")
-	server.Config.Pipeline.Limits.CPUQuota = c.Int("limit-cpu-quota")
-	server.Config.Pipeline.Limits.CPUShares = c.Int("limit-cpu-shares")
-	server.Config.Pipeline.Limits.CPUSet = c.String("limit-cpu-set")
+	_labels := c.StringSlice("default-workflow-labels")
+	labels := make(map[string]string, len(_labels))
+	for _, v := range _labels {
+		name, value, ok := strings.Cut(v, "=")
+		if !ok {
+			return fmt.Errorf("invalid label filter: %s", v)
+		}
+		labels[name] = value
+	}
+	server.Config.Pipeline.DefaultWorkflowLabels = labels
 
 	// backend options for pipeline compiler
 	server.Config.Pipeline.Proxy.No = c.String("backend-no-proxy")
@@ -206,11 +237,7 @@ func setupEvilGlobals(ctx context.Context, c *cli.Command, s store.Store) error 
 	} else {
 		server.Config.Server.WebhookHost = serverHost
 	}
-	if c.IsSet("server-dev-oauth-host-deprecated") {
-		server.Config.Server.OAuthHost = c.String("server-dev-oauth-host-deprecated")
-	} else {
-		server.Config.Server.OAuthHost = serverHost
-	}
+	server.Config.Server.OAuthHost = serverHost
 	server.Config.Server.Port = c.String("server-addr")
 	server.Config.Server.PortTLS = c.String("server-addr-tls")
 	server.Config.Server.StatusContext = c.String("status-context")
@@ -226,9 +253,9 @@ func setupEvilGlobals(ctx context.Context, c *cli.Command, s store.Store) error 
 	server.Config.Server.CustomJsFile = strings.TrimSpace(c.String("custom-js-file"))
 	server.Config.Pipeline.Networks = c.StringSlice("network")
 	server.Config.Pipeline.Volumes = c.StringSlice("volume")
-	server.Config.Pipeline.Privileged = c.StringSlice("escalate")
 	server.Config.WebUI.EnableSwagger = c.Bool("enable-swagger")
 	server.Config.WebUI.SkipVersionCheck = c.Bool("skip-version-check")
+	server.Config.Pipeline.PrivilegedPlugins = c.StringSlice("plugins-privileged")
 
 	// prometheus
 	server.Config.Prometheus.AuthToken = c.String("prometheus-auth-token")

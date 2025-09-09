@@ -18,14 +18,14 @@ package server
 import (
 	"time"
 
-	"go.woodpecker-ci.org/woodpecker/v2/server/cache"
-	"go.woodpecker-ci.org/woodpecker/v2/server/logging"
-	"go.woodpecker-ci.org/woodpecker/v2/server/model"
-	"go.woodpecker-ci.org/woodpecker/v2/server/pubsub"
-	"go.woodpecker-ci.org/woodpecker/v2/server/queue"
-	"go.woodpecker-ci.org/woodpecker/v2/server/services"
-	"go.woodpecker-ci.org/woodpecker/v2/server/services/log"
-	"go.woodpecker-ci.org/woodpecker/v2/server/services/permissions"
+	"go.woodpecker-ci.org/woodpecker/v3/server/cache"
+	"go.woodpecker-ci.org/woodpecker/v3/server/logging"
+	"go.woodpecker-ci.org/woodpecker/v3/server/model"
+	"go.woodpecker-ci.org/woodpecker/v3/server/pubsub"
+	"go.woodpecker-ci.org/woodpecker/v3/server/queue"
+	"go.woodpecker-ci.org/woodpecker/v3/server/services"
+	"go.woodpecker-ci.org/woodpecker/v3/server/services/log"
+	"go.woodpecker-ci.org/woodpecker/v3/server/services/permissions"
 )
 
 var Config = struct {
@@ -54,6 +54,9 @@ var Config = struct {
 		CustomCSSFile       string
 		CustomJsFile        string
 	}
+	Agent struct {
+		DisableUserRegisteredAgentRegistration bool
+	}
 	WebUI struct {
 		EnableSwagger    bool
 		SkipVersionCheck bool
@@ -63,12 +66,15 @@ var Config = struct {
 	}
 	Pipeline struct {
 		AuthenticatePublicRepos             bool
+		DefaultAllowPullRequests            bool
 		DefaultCancelPreviousPipelineEvents []model.WebhookEvent
-		DefaultCloneImage                   string
-		Limits                              model.ResourceLimit
+		DefaultApprovalMode                 model.ApprovalMode
+		DefaultWorkflowLabels               map[string]string
+		DefaultClonePlugin                  string
+		TrustedClonePlugins                 []string
 		Volumes                             []string
 		Networks                            []string
-		Privileged                          []string
+		PrivilegedPlugins                   []string
 		DefaultTimeout                      int64
 		MaxTimeout                          int64
 		Proxy                               struct {
