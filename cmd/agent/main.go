@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	_ "net/http/pprof"
 
 	"github.com/rs/zerolog/log"
 
