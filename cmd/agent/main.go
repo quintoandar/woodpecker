@@ -16,16 +16,15 @@ package main
 
 import (
 	"context"
-	_ "net/http/pprof"
 
 	"github.com/rs/zerolog/log"
 
-	"go.woodpecker-ci.org/woodpecker/v2/cmd/agent/core"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/docker"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/kubernetes"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/local"
-	backendTypes "go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/types"
-	"go.woodpecker-ci.org/woodpecker/v2/shared/utils"
+	"go.woodpecker-ci.org/woodpecker/v3/cmd/agent/core"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/docker"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/kubernetes"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/local"
+	backendTypes "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
+	"go.woodpecker-ci.org/woodpecker/v3/shared/utils"
 )
 
 var backends = []backendTypes.Backend{

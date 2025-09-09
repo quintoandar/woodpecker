@@ -16,19 +16,19 @@ package config
 
 import (
 	"context"
-	"crypto"
+	"crypto/ed25519"
 	"fmt"
 	net_http "net/http"
 
-	"go.woodpecker-ci.org/woodpecker/v2/server/forge"
-	"go.woodpecker-ci.org/woodpecker/v2/server/forge/types"
-	"go.woodpecker-ci.org/woodpecker/v2/server/model"
-	"go.woodpecker-ci.org/woodpecker/v2/server/services/utils"
+	"go.woodpecker-ci.org/woodpecker/v3/server/forge"
+	"go.woodpecker-ci.org/woodpecker/v3/server/forge/types"
+	"go.woodpecker-ci.org/woodpecker/v3/server/model"
+	"go.woodpecker-ci.org/woodpecker/v3/server/services/utils"
 )
 
 type http struct {
 	endpoint   string
-	privateKey crypto.PrivateKey
+	privateKey ed25519.PrivateKey
 }
 
 // configData same as forge.FileMeta but with json tags and string data.
@@ -41,14 +41,14 @@ type requestStructure struct {
 	Repo          *model.Repo     `json:"repo"`
 	Pipeline      *model.Pipeline `json:"pipeline"`
 	Netrc         *model.Netrc    `json:"netrc"`
-	Configuration []*configData   `json:"configs"` // TODO: deprecate in favor of netrc and remove in next major release
+	Configuration []*configData   `json:"configs"`
 }
 
 type responseStructure struct {
 	Configs []*configData `json:"configs"`
 }
 
-func NewHTTP(endpoint string, privateKey crypto.PrivateKey) Service {
+func NewHTTP(endpoint string, privateKey ed25519.PrivateKey) Service {
 	return &http{endpoint, privateKey}
 }
 
@@ -67,8 +67,8 @@ func (h *http) Fetch(ctx context.Context, forge forge.Forge, user *model.User, r
 	body := requestStructure{
 		Repo:          repo,
 		Pipeline:      pipeline,
-		Configuration: currentConfigs,
 		Netrc:         netrc,
+		Configuration: currentConfigs,
 	}
 
 	status, err := utils.Send(ctx, net_http.MethodPost, h.endpoint, h.privateKey, body, response)

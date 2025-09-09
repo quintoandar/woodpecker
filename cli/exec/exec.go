@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
@@ -25,23 +26,26 @@ import (
 	"strings"
 
 	"github.com/drone/envsubst"
+	"github.com/oklog/ulid/v2"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 
-	"go.woodpecker-ci.org/woodpecker/v2/cli/common"
-	"go.woodpecker-ci.org/woodpecker/v2/cli/lint"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/backend"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/docker"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/kubernetes"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/local"
-	backend_types "go.woodpecker-ci.org/woodpecker/v2/pipeline/backend/types"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/frontend/yaml"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/frontend/yaml/compiler"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/frontend/yaml/linter"
-	"go.woodpecker-ci.org/woodpecker/v2/pipeline/frontend/yaml/matrix"
-	pipelineLog "go.woodpecker-ci.org/woodpecker/v2/pipeline/log"
-	"go.woodpecker-ci.org/woodpecker/v2/shared/utils"
+	"go.woodpecker-ci.org/woodpecker/v3/cli/common"
+	"go.woodpecker-ci.org/woodpecker/v3/cli/lint"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/docker"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/kubernetes"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/local"
+	backend_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/metadata"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/compiler"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/linter"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/matrix"
+	pipelineLog "go.woodpecker-ci.org/woodpecker/v3/pipeline/log"
+	"go.woodpecker-ci.org/woodpecker/v3/shared/constant"
+	"go.woodpecker-ci.org/woodpecker/v3/shared/utils"
 )
 
 // Command exports the exec command.
@@ -74,6 +78,7 @@ func execDir(ctx context.Context, c *cli.Command, dir string) error {
 	if runtime.GOOS == "windows" {
 		repoPath = convertPathForWindows(repoPath)
 	}
+	// TODO: respect depends_on and do parallel runs with output to multiple _windows_ e.g. tmux like
 	return filepath.Walk(dir, func(path string, info os.FileInfo, e error) error {
 		if e != nil {
 			return e
@@ -82,7 +87,7 @@ func execDir(ctx context.Context, c *cli.Command, dir string) error {
 		// check if it is a regular file (not dir)
 		if info.Mode().IsRegular() && (strings.HasSuffix(info.Name(), ".yaml") || strings.HasSuffix(info.Name(), ".yml")) {
 			fmt.Println("#", info.Name())
-			_ = runExec(ctx, c, path, repoPath) // TODO: should we drop errors or store them and report back?
+			_ = runExec(ctx, c, path, repoPath, false) // TODO: should we drop errors or store them and report back?
 			fmt.Println("")
 			return nil
 		}
@@ -101,10 +106,10 @@ func execFile(ctx context.Context, c *cli.Command, file string) error {
 	if runtime.GOOS == "windows" {
 		repoPath = convertPathForWindows(repoPath)
 	}
-	return runExec(ctx, c, file, repoPath)
+	return runExec(ctx, c, file, repoPath, true)
 }
 
-func runExec(ctx context.Context, c *cli.Command, file, repoPath string) error {
+func runExec(ctx context.Context, c *cli.Command, file, repoPath string, singleExec bool) error {
 	dat, err := os.ReadFile(file)
 	if err != nil {
 		return err
@@ -119,7 +124,7 @@ func runExec(ctx context.Context, c *cli.Command, file, repoPath string) error {
 		axes = append(axes, matrix.Axis{})
 	}
 	for _, axis := range axes {
-		err := execWithAxis(ctx, c, file, repoPath, axis)
+		err := execWithAxis(ctx, c, file, repoPath, axis, singleExec)
 		if err != nil {
 			return err
 		}
@@ -127,12 +132,24 @@ func runExec(ctx context.Context, c *cli.Command, file, repoPath string) error {
 	return nil
 }
 
-func execWithAxis(ctx context.Context, c *cli.Command, file, repoPath string, axis matrix.Axis) error {
-	metadata := metadataFromContext(ctx, c, axis)
+func execWithAxis(ctx context.Context, c *cli.Command, file, repoPath string, axis matrix.Axis, singleExec bool) error {
+	metadataWorkflow := &metadata.Workflow{}
+	if !singleExec {
+		// TODO: proper try to use the engine to generate the same metadata for workflows
+		// https://github.com/woodpecker-ci/woodpecker/pull/3967
+		metadataWorkflow.Name = strings.TrimSuffix(strings.TrimSuffix(file, ".yaml"), ".yml")
+	}
+	metadata, err := metadataFromContext(ctx, c, axis, metadataWorkflow)
+	if err != nil {
+		return fmt.Errorf("could not create metadata: %w", err)
+	} else if metadata == nil {
+		return fmt.Errorf("metadata is nil")
+	}
+
 	environ := metadata.Environ()
+	maps.Copy(environ, metadata.Workflow.Matrix)
 	var secrets []compiler.Secret
-	for key, val := range metadata.Workflow.Matrix {
-		environ[key] = val
+	for key, val := range c.StringMap("secrets") {
 		secrets = append(secrets, compiler.Secret{
 			Name:  key,
 			Value: val,
@@ -166,6 +183,9 @@ func execWithAxis(ctx context.Context, c *cli.Command, file, repoPath string, ax
 		return err
 	}
 
+	// emulate server behavior https://github.com/woodpecker-ci/woodpecker/blob/eebaa10d104cbc3fa7ce4c0e344b0b7978405135/server/pipeline/stepbuilder/stepBuilder.go#L289-L295
+	prefix := "wp_" + ulid.Make().String()
+
 	// configure volumes for local execution
 	volumes := c.StringSlice("volumes")
 	if c.Bool("local") {
@@ -180,18 +200,28 @@ func execWithAxis(ctx context.Context, c *cli.Command, file, repoPath string, ax
 			workspacePath = c.String("workspace-path")
 		}
 
-		volumes = append(volumes, c.String("prefix")+"_default:"+workspaceBase)
+		volumes = append(volumes, prefix+"_default:"+workspaceBase)
 		volumes = append(volumes, repoPath+":"+path.Join(workspaceBase, workspacePath))
 	}
 
+	privilegedPlugins := c.StringSlice("plugins-privileged")
+
 	// lint the yaml file
-	err = linter.New(linter.WithTrusted(true)).Lint([]*linter.WorkflowConfig{{
+	err = linter.New(
+		linter.WithTrusted(linter.TrustedConfiguration{
+			Security: c.Bool("repo-trusted-security"),
+			Network:  c.Bool("repo-trusted-network"),
+			Volumes:  c.Bool("repo-trusted-volumes"),
+		}),
+		linter.PrivilegedPlugins(privilegedPlugins),
+		linter.WithTrustedClonePlugins(constant.TrustedClonePlugins),
+	).Lint([]*linter.WorkflowConfig{{
 		File:      path.Base(file),
 		RawConfig: confStr,
 		Workflow:  conf,
 	}})
 	if err != nil {
-		str, err := lint.FormatLintError(file, err)
+		str, err := lint.FormatLintError(file, err, false)
 		fmt.Print(str)
 		if err != nil {
 			return err
@@ -201,7 +231,7 @@ func execWithAxis(ctx context.Context, c *cli.Command, file, repoPath string, ax
 	// compiles the yaml file
 	compiled, err := compiler.New(
 		compiler.WithEscalated(
-			c.StringSlice("privileged")...,
+			privilegedPlugins...,
 		),
 		compiler.WithVolumes(volumes...),
 		compiler.WithWorkspace(
@@ -211,9 +241,7 @@ func execWithAxis(ctx context.Context, c *cli.Command, file, repoPath string, ax
 		compiler.WithNetworks(
 			c.StringSlice("network")...,
 		),
-		compiler.WithPrefix(
-			c.String("prefix"),
-		),
+		compiler.WithPrefix(prefix),
 		compiler.WithProxy(compiler.ProxyOptions{
 			NoProxy:    c.String("backend-no-proxy"),
 			HTTPProxy:  c.String("backend-http-proxy"),
@@ -227,7 +255,7 @@ func execWithAxis(ctx context.Context, c *cli.Command, file, repoPath string, ax
 			c.String("netrc-password"),
 			c.String("netrc-machine"),
 		),
-		compiler.WithMetadata(metadata),
+		compiler.WithMetadata(*metadata),
 		compiler.WithSecret(secrets...),
 		compiler.WithEnviron(pipelineEnv),
 	).Compile(conf)
@@ -281,8 +309,7 @@ func convertPathForWindows(path string) string {
 	return filepath.ToSlash(path)
 }
 
-const maxLogLineLength = 1024 * 1024 // 1mb
 var defaultLogger = pipeline.Logger(func(step *backend_types.Step, rc io.ReadCloser) error {
 	logWriter := NewLineWriter(step.Name, step.UUID)
-	return pipelineLog.CopyLineByLine(logWriter, rc, maxLogLineLength)
+	return pipelineLog.CopyLineByLine(logWriter, rc, pipeline.MaxLogLineLength)
 })
