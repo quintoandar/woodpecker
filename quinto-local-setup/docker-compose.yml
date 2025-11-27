@@ -1,0 +1,3 @@
+include:
+  - docker-compose-woodpecker.yml
+  - docker-compose-cloudflare.yml

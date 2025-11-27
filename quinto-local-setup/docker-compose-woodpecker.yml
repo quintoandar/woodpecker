@@ -1,0 +1,57 @@
+# References:
+# - https://github.com/devforth/woodpecker-compose-template/blob/master/docker-compose.yml
+# - https://woodpecker-ci.org/docs/administration/installation/docker-compose
+
+services:
+  woodpecker-server:
+    image: woodpeckerci/woodpecker-server:v3.9.0
+    ports:
+      - 80:80
+      - 443:443
+    networks:
+      - woodpecker
+    volumes:
+      - woodpecker-server-data:/var/lib/woodpecker/
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: always
+    environment:
+      - WOODPECKER_OPEN=false
+      - WOODPECKER_GITHUB=true
+      - WOODPECKER_SERVER_ADDR=:80
+      - WOODPECKER_LETS_ENCRYPT=${WOODPECKER_LETS_ENCRYPT}
+      - WOODPECKER_HOST=${WOODPECKER_HOST}
+      - WOODPECKER_ADMIN=${WOODPECKER_ADMIN}
+      - WOODPECKER_ORGS=${WOODPECKER_ORGS}
+      - WOODPECKER_REPO_OWNERS=${WOODPECKER_REPO_OWNERS}
+      - WOODPECKER_GITHUB_CLIENT=${WOODPECKER_GITHUB_CLIENT_ID}
+      - WOODPECKER_GITHUB_SECRET=${WOODPECKER_GITHUB_CLIENT_SECRET}
+      - WOODPECKER_AGENT_SECRET="${WOODPECKER_RPC_SECRET}"
+
+      - WOODPECKER_DATABASE_DRIVER=sqlite3
+      - WOODPECKER_DATABASE_DATASOURCE=/var/lib/woodpecker/woodpecker.sqlite
+      - WOODPECKER_DEBUG=true
+
+  woodpecker-agent:
+    image: woodpeckerci/woodpecker-agent:v3.9.0
+    command: agent
+    restart: always
+    depends_on:
+      - woodpecker-server
+    networks:
+      - woodpecker
+    volumes:
+      - woodpecker-agent-config:/etc/woodpecker
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    environment:
+      - WOODPECKER_AGENT_SECRET="${WOODPECKER_RPC_SECRET}"
+      - WOODPECKER_SERVER=woodpecker-server:9000
+      - WOODPECKER_DEBUG=true
+
+networks:
+  woodpecker:
+    name: woodpecker_network
+
+volumes:
+  woodpecker-server-data:
+  woodpecker-agent-config:
