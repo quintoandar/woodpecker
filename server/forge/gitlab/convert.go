@@ -138,6 +138,7 @@ func convertMergeRequestHook(hook *gitlab.MergeEvent, req *http.Request) (int, *
 	pipeline.Title = obj.Title
 	pipeline.ForgeURL = obj.URL
 	pipeline.PullRequestLabels = convertLabels(hook.Labels)
+	pipeline.PullRequestDraft = obj.Draft || obj.WorkInProgress
 	pipeline.FromFork = target.PathWithNamespace != source.PathWithNamespace
 
 	return obj.IID, repo, pipeline, nil

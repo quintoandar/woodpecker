@@ -171,6 +171,7 @@ func pipelineFromPullRequest(hook *pullRequestHook) *model.Pipeline {
 			hook.PullRequest.Base.Ref,
 		),
 		PullRequestLabels: convertLabels(hook.PullRequest.Labels),
+		PullRequestDraft:  hook.PullRequest.Draft,
 		FromFork:          hook.PullRequest.Head.RepoID != hook.PullRequest.Base.RepoID,
 	}
 

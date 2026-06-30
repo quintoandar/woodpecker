@@ -185,6 +185,27 @@ func Test_GitLab(t *testing.T) {
 			assert.Equal(t, "Update client.go 🎉", pipeline.Title)
 			assert.Len(t, pipeline.ChangedFiles, 0) // see L217
 			assert.Equal(t, model.EventPull, pipeline.Event)
+			assert.False(t, pipeline.PullRequestDraft)
+		}
+	})
+
+	t.Run("merge request work in progress", func(t *testing.T) {
+		payload := bytes.ReplaceAll(
+			fixtures.HookPullRequest,
+			[]byte(`"work_in_progress": false`),
+			[]byte(`"work_in_progress": true`),
+		)
+		req, _ := http.NewRequest(
+			fixtures.ServiceHookMethod,
+			fixtures.ServiceHookURL.String(),
+			bytes.NewReader(payload),
+		)
+		req.Header = fixtures.ServiceHookHeaders
+
+		_, pipeline, err := client.Hook(ctx, req)
+		assert.NoError(t, err)
+		if assert.NotNil(t, pipeline) {
+			assert.True(t, pipeline.PullRequestDraft)
 		}
 	})
 
