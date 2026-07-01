@@ -74,6 +74,7 @@ This is the reference list of all environment variables available to your pipeli
 | `CI_COMMIT_TAG`                  | commit tag name (empty if event is not `tag`)                                                                      | `v1.10.3`                                                                                  |
 | `CI_COMMIT_PULL_REQUEST`         | commit pull request number (set only for `pull_request` and `pull_request_closed` events)                          | `1`                                                                                        |
 | `CI_COMMIT_PULL_REQUEST_LABELS`  | labels assigned to pull request (set only for `pull_request` and `pull_request_closed` events)                     | `server`                                                                                   |
+| `CI_COMMIT_PULL_REQUEST_DRAFT`   | whether the pull request is a draft (set only for `pull_request` and `pull_request_closed` events; see [forge support](#ci_commit_pull_request_draft-forge-support)) | `true`, `false`                                                                            |
 | `CI_COMMIT_MESSAGE`              | commit message                                                                                                     | `Initial commit`                                                                           |
 | `CI_COMMIT_AUTHOR`               | commit author username                                                                                             | `john-doe`                                                                                 |
 | `CI_COMMIT_AUTHOR_EMAIL`         | commit author email address                                                                                        | `john-doe@example.com`                                                                     |
@@ -223,3 +224,18 @@ Example variable substitution strips `v` prefix from `v.1.0.0`:
      settings:
 +      target: /target/${CI_COMMIT_TAG##v}
 ```
+
+## `CI_COMMIT_PULL_REQUEST_DRAFT` forge support
+
+For pull request events, `CI_COMMIT_PULL_REQUEST_DRAFT` is set to `true` or `false` depending on whether the pull request is a draft.
+
+| Forge                | Supported          | Notes                                                             |
+| -------------------- | ------------------ | ----------------------------------------------------------------- |
+| GitHub               | :white_check_mark: |                                                                   |
+| Gitea                | :white_check_mark: |                                                                   |
+| GitLab               | :white_check_mark: | Uses `draft`; falls back to legacy `work_in_progress` when needed |
+| Forgejo              | :x:                | Webhook payloads include draft status, but it is not exposed yet  |
+| Bitbucket            | :x:                | Webhook payloads include draft status, but it is not exposed yet  |
+| Bitbucket Datacenter | :x:                | Webhook payloads include draft status, but it is not exposed yet  |
+
+On unsupported forges the variable is still set to `false`.

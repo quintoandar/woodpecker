@@ -51,6 +51,7 @@ type Pipeline struct {
 	ChangedFiles        []string               `json:"changed_files,omitempty" xorm:"LONGTEXT 'changed_files'"`
 	AdditionalVariables map[string]string      `json:"variables,omitempty"     xorm:"json 'additional_variables'"`
 	PullRequestLabels   []string               `json:"pr_labels,omitempty"     xorm:"json 'pr_labels'"`
+	PullRequestDraft    bool                   `json:"pr_draft,omitempty"      xorm:"pr_draft"`
 	IsPrerelease        bool                   `json:"is_prerelease,omitempty" xorm:"is_prerelease"`
 	FromFork            bool                   `json:"from_fork,omitempty"     xorm:"from_fork"`
 } //	@name	Pipeline
