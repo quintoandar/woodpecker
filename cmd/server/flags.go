@@ -99,6 +99,12 @@ var flags = append([]cli.Flag{
 		Name:    "custom-js-file",
 		Usage:   "file path for the server to serve a custom .JS file, used for customizing the UI",
 	},
+	&cli.DurationFlag{
+		Sources: cli.EnvVars("WOODPECKER_WEBHOOK_SYNC_TIMEOUT"),
+		Name:    "webhook-sync-timeout",
+		Usage:   "max time to wait for pipeline creation triggered by an incoming webhook before responding 202 Accepted and finishing it in the background; 0 disables the fallback and always responds synchronously",
+		Value:   5 * time.Second,
+	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_GRPC_ADDR"),
 		Name:    "grpc-addr",

@@ -17,10 +17,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -33,6 +35,17 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/server/store"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/token"
 )
+
+// backgroundPipelineCreationTimeout caps how long a webhook-triggered pipeline
+// creation may keep running after the HTTP handler has already responded 202
+// Accepted (see PostHook). It bounds the detached background goroutine so a
+// stuck creation cannot leak indefinitely.
+const backgroundPipelineCreationTimeout = 2 * time.Minute
+
+type pipelineCreateResult struct {
+	pipeline *model.Pipeline
+	err      error
+}
 
 // GetQueueInfo
 //
@@ -238,12 +251,45 @@ func PostHook(c *gin.Context) {
 	//
 	// 6. Finally create a pipeline
 	//
+	// Pipeline creation can be slow (forge round-trips, config fetching). To
+	// avoid the forge timing out and retrying the webhook delivery, we wait only
+	// up to WebhookSyncTimeout for creation to finish. If it completes in time we
+	// respond synchronously with the created pipeline (preserving the old
+	// behavior and API response). If it takes longer we respond 202 Accepted and
+	// let creation finish in the background.
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), backgroundPipelineCreationTimeout)
 
-	pl, err := pipeline.Create(c, _store, repo, pipelineFromForge)
-	if err != nil {
-		handlePipelineErr(c, err)
+	done := make(chan pipelineCreateResult, 1)
+	go func() {
+		defer cancel()
+		pl, createErr := pipeline.Create(bgCtx, _store, repo, pipelineFromForge)
+		if createErr != nil {
+			log.Error().Err(createErr).Str("repo", repo.FullName).Msg("could not create pipeline from webhook")
+		}
+		done <- pipelineCreateResult{pipeline: pl, err: createErr}
+	}()
+
+	syncTimeout := server.Config.Server.WebhookSyncTimeout
+	if syncTimeout > 0 {
+		select {
+		case result := <-done:
+			if result.err != nil {
+				handlePipelineErr(c, result.err)
+			} else {
+				c.JSON(http.StatusOK, result.pipeline)
+			}
+		case <-time.After(syncTimeout):
+			log.Debug().Str("repo", repo.FullName).Dur("timeout", syncTimeout).Msg("pipeline creation exceeded webhook sync timeout, continuing in background")
+			c.JSON(http.StatusAccepted, nil)
+		}
+		return
+	}
+
+	result := <-done
+	if result.err != nil {
+		handlePipelineErr(c, result.err)
 	} else {
-		c.JSON(http.StatusOK, pl)
+		c.JSON(http.StatusOK, result.pipeline)
 	}
 }
 
