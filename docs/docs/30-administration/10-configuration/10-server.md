@@ -1074,9 +1074,13 @@ Specify a configuration service endpoint, see [Configuration Extension](#externa
 ### FORGE_TIMEOUT
 
 - Name: `WOODPECKER_FORGE_TIMEOUT`
-- Default: 5s
+- Default: 15s
 
 Specify timeout when fetching the Woodpecker configuration from forge. See <https://pkg.go.dev/time#ParseDuration> for syntax reference.
+
+GitHub webhooks must receive a 2xx response within **10 seconds** or the delivery is marked timed out. Raising this value is only safe when [`WOODPECKER_WEBHOOK_SYNC_TIMEOUT`](#webhook_sync_timeout) is enabled (the default): Woodpecker acknowledges the webhook quickly (or after the sync wait) and continues forge config fetch in the background. Do **not** set a long forge timeout with `WOODPECKER_WEBHOOK_SYNC_TIMEOUT=0` (fully synchronous hooks), or GitHub may time out the delivery.
+
+For monorepos with many files under `.woodpecker/`, 15–30s is a reasonable range once async webhook ack is in place.
 
 ---
 
@@ -1085,7 +1089,18 @@ Specify timeout when fetching the Woodpecker configuration from forge. See <http
 - Name: `WOODPECKER_FORGE_RETRY`
 - Default: 3
 
-Specify how many retries of fetching the Woodpecker configuration from a forge are done before we fail.
+Specify how many retries of fetching the Woodpecker configuration from a forge are done before we fail. Retries use a short linear backoff (100ms × attempt) between attempts to tolerate transient forge gateway errors (for example GitHub HTTP 502).
+
+---
+
+### WEBHOOK_SYNC_TIMEOUT
+
+- Name: `WOODPECKER_WEBHOOK_SYNC_TIMEOUT`
+- Default: 5s
+
+Maximum time to wait for pipeline creation triggered by an incoming webhook before responding **202 Accepted** and finishing creation in the background. Set to `0` to always wait for creation and respond synchronously (legacy behavior).
+
+This exists so forge providers with a hard webhook response deadline (GitHub: 10s) do not mark deliveries as timed out when config fetch or pipeline setup is slow. Background creation is capped at 2 minutes.
 
 ---
 
