@@ -17,33 +17,35 @@ package github
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"strings"
 
-	"golang.org/x/oauth2"
-
 	forge_types "go.woodpecker-ci.org/woodpecker/v3/server/forge/types"
+	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 )
 
-const dirGraphQLQuery = `
+const (
+	graphqlErrorTypeNotFound = "NOT_FOUND"
+
+	dirGraphQLQuery = `
 query($owner: String!, $name: String!, $expression: String!) {
   repository(owner: $owner, name: $name) {
     object(expression: $expression) {
       ... on Tree {
         entries {
           name
+          path
           type
           object {
             ... on Blob {
               text
               isBinary
               isTruncated
-              byteSize
             }
           }
         }
@@ -52,71 +54,67 @@ query($owner: String!, $name: String!, $expression: String!) {
   }
 }
 `
+)
 
 type graphqlRequest struct {
 	Query     string         `json:"query"`
 	Variables map[string]any `json:"variables"`
 }
 
+type graphqlError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+}
+
+type dirBlob struct {
+	Text        *string `json:"text"`
+	IsBinary    *bool   `json:"isBinary"`
+	IsTruncated bool    `json:"isTruncated"`
+}
+
+type dirEntry struct {
+	Name   string   `json:"name"`
+	Path   string   `json:"path"`
+	Type   string   `json:"type"`
+	Object *dirBlob `json:"object"`
+}
+
+type dirTree struct {
+	Entries []dirEntry `json:"entries"`
+}
+
+type dirRepository struct {
+	Object *dirTree `json:"object"`
+}
+
 type dirGraphQLResponse struct {
 	Data struct {
-		Repository *struct {
-			Object *struct {
-				Entries []struct {
-					Name   string `json:"name"`
-					Type   string `json:"type"`
-					Object *struct {
-						Text         *string `json:"text"`
-						IsBinary     *bool   `json:"isBinary"`
-						IsTruncated  bool    `json:"isTruncated"`
-						ByteSize     int     `json:"byteSize"`
-					} `json:"object"`
-				} `json:"entries"`
-			} `json:"object"`
-		} `json:"repository"`
+		Repository *dirRepository `json:"repository"`
 	} `json:"data"`
-	Errors []struct {
-		Message string `json:"message"`
-	} `json:"errors"`
+	Errors []graphqlError `json:"errors"`
 }
 
 // graphqlEndpoint returns the GraphQL API URL for this forge client.
 // GitHub.com uses https://api.github.com/graphql; GitHub Enterprise uses {url}/api/graphql.
 func (c *client) graphqlEndpoint() string {
-	if c.API == defaultAPI || strings.HasPrefix(c.API, "https://api.github.com") {
+	if c.url == defaultURL || c.API == defaultAPI {
 		return "https://api.github.com/graphql"
 	}
 	return strings.TrimSuffix(c.url, "/") + "/api/graphql"
 }
 
-func (c *client) newHTTPClient(ctx context.Context, token string) *http.Client {
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
-	tc := oauth2.NewClient(ctx, ts)
-	if c.SkipVerify {
-		tp, _ := tc.Transport.(*oauth2.Transport)
-		tp.Base = &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: true, //nolint:gosec
-			},
-		}
-	}
-	return tc
-}
-
 // dirGraphQL fetches a single directory level of files via the GitHub GraphQL API,
 // returning blob contents inline to avoid the REST Contents N+1 fan-out.
-func (c *client) dirGraphQL(ctx context.Context, token, owner, name, commit, path string) ([]*forge_types.FileMeta, error) {
-	path = strings.Trim(path, "/")
-	expression := commit + ":" + path
+// Truncated or incomplete blobs fall back to REST File() for that path only.
+func (c *client) dirGraphQL(ctx context.Context, u *model.User, r *model.Repo, b *model.Pipeline, dirPath string) ([]*forge_types.FileMeta, error) {
+	dirPath = strings.Trim(dirPath, "/")
+	expression := b.Commit + ":" + dirPath
 
 	body, err := json.Marshal(graphqlRequest{
 		Query: dirGraphQLQuery,
 		Variables: map[string]any{
-			"owner":      owner,
-			"name":       name,
+			"owner":      r.Owner,
+			"name":       r.Name,
 			"expression": expression,
 		},
 	})
@@ -131,7 +129,7 @@ func (c *client) dirGraphQL(ctx context.Context, token, owner, name, commit, pat
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.newHTTPClient(ctx, token).Do(req)
+	resp, err := c.newClientToken(ctx, u.AccessToken).Client().Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -141,10 +139,6 @@ func (c *client) dirGraphQL(ctx context.Context, token, owner, name, commit, pat
 	if err != nil {
 		return nil, err
 	}
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, &forge_types.ErrConfigNotFound{Configs: []string{path}}
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("github graphql: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
 	}
@@ -153,46 +147,68 @@ func (c *client) dirGraphQL(ctx context.Context, token, owner, name, commit, pat
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		return nil, fmt.Errorf("github graphql: decode response: %w", err)
 	}
-	if len(parsed.Errors) > 0 {
-		msgs := make([]string, 0, len(parsed.Errors))
-		for _, e := range parsed.Errors {
-			msgs = append(msgs, e.Message)
-		}
-		joined := strings.Join(msgs, "; ")
-		lower := strings.ToLower(joined)
-		if strings.Contains(lower, "could not resolve") || strings.Contains(lower, "not found") {
-			return nil, errors.Join(fmt.Errorf("github graphql: %s", joined), &forge_types.ErrConfigNotFound{Configs: []string{path}})
-		}
-		return nil, fmt.Errorf("github graphql: %s", joined)
+	if err := graphQLResponseError(parsed.Errors, dirPath); err != nil {
+		return nil, err
 	}
-
 	if parsed.Data.Repository == nil || parsed.Data.Repository.Object == nil {
-		return nil, &forge_types.ErrConfigNotFound{Configs: []string{path}}
+		return nil, &forge_types.ErrConfigNotFound{Configs: []string{dirPath}}
 	}
 
+	return c.entriesToFileMeta(ctx, u, r, b, dirPath, parsed.Data.Repository.Object.Entries)
+}
+
+func graphQLResponseError(errs []graphqlError, dirPath string) error {
+	if len(errs) == 0 {
+		return nil
+	}
+
+	msgs := make([]string, 0, len(errs))
+	notFound := false
+	for _, e := range errs {
+		msgs = append(msgs, e.Message)
+		if e.Type == graphqlErrorTypeNotFound {
+			notFound = true
+		}
+	}
+	joined := strings.Join(msgs, "; ")
+	if notFound {
+		return errors.Join(fmt.Errorf("github graphql: %s", joined), &forge_types.ErrConfigNotFound{Configs: []string{dirPath}})
+	}
+	return fmt.Errorf("github graphql: %s", joined)
+}
+
+func entryPath(dirPath string, entry dirEntry) string {
+	if entry.Path != "" {
+		return entry.Path
+	}
+	return path.Join(dirPath, entry.Name)
+}
+
+func (c *client) entriesToFileMeta(ctx context.Context, u *model.User, r *model.Repo, b *model.Pipeline, dirPath string, entries []dirEntry) ([]*forge_types.FileMeta, error) {
 	var files []*forge_types.FileMeta
-	for _, entry := range parsed.Data.Repository.Object.Entries {
+	for _, entry := range entries {
 		if entry.Type != "blob" {
 			continue
 		}
-		fullName := path + "/" + entry.Name
-		if entry.Object == nil {
-			return nil, fmt.Errorf("github graphql: missing blob object for %s", fullName)
-		}
-		if entry.Object.IsBinary != nil && *entry.Object.IsBinary {
+		fullName := entryPath(dirPath, entry)
+		if entry.Object != nil && entry.Object.IsBinary != nil && *entry.Object.IsBinary {
 			continue
 		}
-		if entry.Object.IsTruncated {
-			return nil, fmt.Errorf("github graphql: blob %s is truncated", fullName)
+
+		needsREST := entry.Object == nil || entry.Object.IsTruncated || entry.Object.Text == nil
+		if needsREST {
+			content, err := c.File(ctx, u, r, b, fullName)
+			if err != nil {
+				return nil, fmt.Errorf("github graphql: rest fallback for %s: %w", fullName, err)
+			}
+			files = append(files, &forge_types.FileMeta{Name: fullName, Data: content})
+			continue
 		}
-		if entry.Object.Text == nil {
-			return nil, fmt.Errorf("github graphql: blob %s has no text content", fullName)
-		}
+
 		files = append(files, &forge_types.FileMeta{
 			Name: fullName,
 			Data: []byte(*entry.Object.Text),
 		})
 	}
-
 	return files, nil
 }

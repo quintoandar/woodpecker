@@ -268,7 +268,7 @@ func (c *client) File(ctx context.Context, u *model.User, r *model.Repo, b *mode
 }
 
 func (c *client) Dir(ctx context.Context, u *model.User, r *model.Repo, b *model.Pipeline, f string) ([]*forge_types.FileMeta, error) {
-	return c.dirGraphQL(ctx, u.AccessToken, r.Owner, r.Name, b.Commit, f)
+	return c.dirGraphQL(ctx, u, r, b, f)
 }
 
 func (c *client) PullRequests(ctx context.Context, u *model.User, r *model.Repo, p *model.ListOptions) ([]*model.PullRequest, error) {

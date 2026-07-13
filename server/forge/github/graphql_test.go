@@ -16,11 +16,14 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -38,10 +41,20 @@ func TestGraphQLEndpoint(t *testing.T) {
 	assert.Equal(t, "https://api.github.com/graphql", cloud.(*client).graphqlEndpoint())
 	assert.Equal(t, defaultAPI, cloud.(*client).API)
 
-	ghe, err := New(Opts{URL: "https://ghe.example.com"})
+	ghe, err := New(Opts{URL: "https://ghe.example.com/"})
 	require.NoError(t, err)
 	assert.Equal(t, "https://ghe.example.com/api/graphql", ghe.(*client).graphqlEndpoint())
 	assert.Equal(t, "https://ghe.example.com/api/v3/", ghe.(*client).API)
+}
+
+func withGraphQLServer(t *testing.T, handler http.HandlerFunc) *client {
+	t.Helper()
+	s := httptest.NewServer(handler)
+	t.Cleanup(s.Close)
+
+	forge, err := New(Opts{URL: s.URL, SkipVerify: true})
+	require.NoError(t, err)
+	return forge.(*client)
 }
 
 func TestDirGraphQL(t *testing.T) {
@@ -50,7 +63,7 @@ func TestDirGraphQL(t *testing.T) {
 	const yamlA = "steps:\n  - name: a\n    image: alpine\n"
 	const yamlB = "steps:\n  - name: b\n    image: alpine\n"
 
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := withGraphQLServer(t, func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/graphql", r.URL.Path)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
@@ -58,6 +71,7 @@ func TestDirGraphQL(t *testing.T) {
 		body, err := io.ReadAll(r.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(body), "abc123:.woodpecker")
+		assert.NotContains(t, string(body), "byteSize")
 
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
@@ -65,23 +79,19 @@ func TestDirGraphQL(t *testing.T) {
 				"repository": {
 					"object": {
 						"entries": [
-							{"name": "a.yml", "type": "blob", "object": {"text": ` + jsonString(yamlA) + `, "isBinary": false, "isTruncated": false, "byteSize": 10}},
-							{"name": "b.yaml", "type": "blob", "object": {"text": ` + jsonString(yamlB) + `, "isBinary": false, "isTruncated": false, "byteSize": 10}},
-							{"name": "notes.txt", "type": "blob", "object": {"text": "ignore", "isBinary": false, "isTruncated": false, "byteSize": 6}},
-							{"name": "subdir", "type": "tree", "object": null},
-							{"name": "logo.png", "type": "blob", "object": {"text": null, "isBinary": true, "isTruncated": false, "byteSize": 100}}
+							{"name": "a.yml", "path": ".woodpecker/a.yml", "type": "blob", "object": {"text": ` + jsonString(yamlA) + `, "isBinary": false, "isTruncated": false}},
+							{"name": "b.yaml", "path": ".woodpecker/b.yaml", "type": "blob", "object": {"text": ` + jsonString(yamlB) + `, "isBinary": false, "isTruncated": false}},
+							{"name": "notes.txt", "path": ".woodpecker/notes.txt", "type": "blob", "object": {"text": "ignore", "isBinary": false, "isTruncated": false}},
+							{"name": "subdir", "path": ".woodpecker/subdir", "type": "tree", "object": null},
+							{"name": "logo.png", "path": ".woodpecker/logo.png", "type": "blob", "object": {"text": null, "isBinary": true, "isTruncated": false}}
 						]
 					}
 				}
 			}
 		}`))
-	}))
-	defer s.Close()
+	})
 
-	forge, err := New(Opts{URL: s.URL, SkipVerify: true})
-	require.NoError(t, err)
-
-	files, err := forge.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
+	files, err := c.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
 	require.NoError(t, err)
 
 	byName := map[string]string{}
@@ -98,60 +108,102 @@ func TestDirGraphQL(t *testing.T) {
 func TestDirGraphQLMissingTree(t *testing.T) {
 	t.Parallel()
 
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := withGraphQLServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"data":{"repository":{"object":null}}}`))
-	}))
-	defer s.Close()
+	})
 
-	forge, err := New(Opts{URL: s.URL, SkipVerify: true})
-	require.NoError(t, err)
-
-	_, err = forge.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
+	_, err := c.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
 	require.Error(t, err)
 	assert.True(t, errors.Is(err, &forge_types.ErrConfigNotFound{}))
 }
 
-func TestDirGraphQLTruncatedBlob(t *testing.T) {
+func TestDirGraphQLNotFoundType(t *testing.T) {
 	t.Parallel()
 
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := withGraphQLServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"data": {
-				"repository": {
-					"object": {
-						"entries": [
-							{"name": "big.yml", "type": "blob", "object": {"text": "partial", "isBinary": false, "isTruncated": true, "byteSize": 999999}}
-						]
+			"data": {"repository": null},
+			"errors": [{"message": "Could not resolve to a Repository with the name 'o/r'.", "type": "NOT_FOUND"}]
+		}`))
+	})
+
+	_, err := c.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, &forge_types.ErrConfigNotFound{}))
+}
+
+func TestDirGraphQLGenericError(t *testing.T) {
+	t.Parallel()
+
+	c := withGraphQLServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {"repository": null},
+			"errors": [{"message": "API rate limit exceeded", "type": "RATE_LIMITED"}]
+		}`))
+	})
+
+	_, err := c.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
+	require.Error(t, err)
+	assert.False(t, errors.Is(err, &forge_types.ErrConfigNotFound{}))
+	assert.Contains(t, err.Error(), "rate limit")
+}
+
+func TestDirGraphQLTruncatedBlobFallsBackToREST(t *testing.T) {
+	t.Parallel()
+
+	const fullYAML = "steps:\n  - name: big\n    image: alpine\n    commands: [echo hi]\n"
+
+	c := withGraphQLServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/graphql":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"data": {
+					"repository": {
+						"object": {
+							"entries": [
+								{"name": "big.yml", "path": ".woodpecker/big.yml", "type": "blob", "object": {"text": "partial", "isBinary": false, "isTruncated": true}}
+							]
+						}
 					}
 				}
-			}
-		}`))
-	}))
-	defer s.Close()
+			}`))
+		case strings.Contains(r.URL.Path, "/contents/.woodpecker/big.yml"):
+			encoded := base64.StdEncoding.EncodeToString([]byte(fullYAML))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(fmt.Sprintf(`{
+				"name": "big.yml",
+				"path": ".woodpecker/big.yml",
+				"type": "file",
+				"encoding": "base64",
+				"content": %s,
+				"sha": "abc",
+				"size": %d
+			}`, jsonString(encoded+"\n"), len(fullYAML))))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	})
 
-	forge, err := New(Opts{URL: s.URL, SkipVerify: true})
+	files, err := c.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
 	require.NoError(t, err)
-
-	_, err = forge.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "truncated")
+	require.Len(t, files, 1)
+	assert.Equal(t, ".woodpecker/big.yml", files[0].Name)
+	assert.Equal(t, fullYAML, string(files[0].Data))
 }
 
 func TestDirGraphQLHTTPError(t *testing.T) {
 	t.Parallel()
 
-	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := withGraphQLServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte("[]"))
-	}))
-	defer s.Close()
+	})
 
-	forge, err := New(Opts{URL: s.URL, SkipVerify: true})
-	require.NoError(t, err)
-
-	_, err = forge.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
+	_, err := c.Dir(context.Background(), &model.User{AccessToken: "token"}, &model.Repo{Owner: "o", Name: "r"}, &model.Pipeline{Commit: "abc123"}, ".woodpecker")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "502")
 }
