@@ -58,23 +58,13 @@ func (f *forgeFetcher) Fetch(ctx context.Context, forge forge.Forge, user *model
 	// try to fetch multiple times
 	for i := 0; i < int(f.retryCount); i++ {
 		files, err = ffc.fetch(ctx, strings.TrimSpace(repo.Config))
-		if err != nil {
-			log.Trace().Err(err).Msgf("Fetching config files: Attempt #%d failed", i+1)
-			if i+1 < int(f.retryCount) {
-				// brief backoff so transient forge gateway errors (e.g. GitHub 502)
-				// are less likely to fail the whole fetch immediately
-				select {
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				case <-time.After(time.Duration(i+1) * 100 * time.Millisecond):
-				}
-			}
-		} else {
-			break
+		if err == nil {
+			return files, nil
 		}
+		log.Trace().Err(err).Msgf("Fetching config files: Attempt #%d failed", i+1)
 	}
 
-	return
+	return files, err
 }
 
 type forgeFetcherContext struct {

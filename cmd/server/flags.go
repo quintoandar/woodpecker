@@ -344,7 +344,7 @@ var flags = append([]cli.Flag{
 	&cli.DurationFlag{
 		Sources: cli.EnvVars("WOODPECKER_FORGE_TIMEOUT"),
 		Name:    "forge-timeout",
-		Usage:   "how long before timeout when fetching the Woodpecker configuration from a Forge; safe to raise above GitHub's 10s webhook limit only when WOODPECKER_WEBHOOK_SYNC_TIMEOUT is enabled (default)",
+		Usage:   "timeout when fetching the Woodpecker configuration from a Forge",
 		Value:   time.Second * 15,
 	},
 	&cli.UintFlag{
