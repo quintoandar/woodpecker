@@ -17,10 +17,12 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog/log"
@@ -33,6 +35,17 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/server/store"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/token"
 )
+
+// backgroundPipelineCreationTimeout caps how long a webhook-triggered pipeline
+// creation may keep running after the HTTP handler has already responded 202
+// Accepted (see PostHook). It bounds the detached background goroutine so a
+// stuck creation cannot leak indefinitely.
+const backgroundPipelineCreationTimeout = 2 * time.Minute
+
+type pipelineCreateResult struct {
+	pipeline *model.Pipeline
+	err      error
+}
 
 // GetQueueInfo
 //
@@ -238,13 +251,50 @@ func PostHook(c *gin.Context) {
 	//
 	// 6. Finally create a pipeline
 	//
+	respondWebhookPipelineCreate(c, _store, repo, pipelineFromForge)
+}
 
-	pl, err := pipeline.Create(c, _store, repo, pipelineFromForge)
-	if err != nil {
-		handlePipelineErr(c, err)
+// respondWebhookPipelineCreate runs pipeline.Create with a hybrid sync/async ack:
+// wait up to WebhookSyncTimeout, then either respond with the create result or
+// return 202 Accepted and finish creation in the background.
+func respondWebhookPipelineCreate(c *gin.Context, _store store.Store, repo *model.Repo, pipelineFromForge *model.Pipeline) {
+	bgCtx, cancel := context.WithTimeout(context.Background(), backgroundPipelineCreationTimeout)
+
+	done := make(chan pipelineCreateResult, 1)
+	go func() {
+		defer cancel()
+		pl, createErr := pipeline.Create(bgCtx, _store, repo, pipelineFromForge)
+		done <- pipelineCreateResult{pipeline: pl, err: createErr}
+	}()
+
+	var result pipelineCreateResult
+	syncTimeout := server.Config.Server.WebhookSyncTimeout
+	if syncTimeout > 0 {
+		select {
+		case result = <-done:
+		case <-time.After(syncTimeout):
+			log.Debug().Str("repo", repo.FullName).Dur("timeout", syncTimeout).Msg("pipeline creation exceeded webhook sync timeout, continuing in background")
+			c.JSON(http.StatusAccepted, nil)
+			go logBackgroundWebhookCreate(repo.FullName, done)
+			return
+		}
 	} else {
-		c.JSON(http.StatusOK, pl)
+		result = <-done
 	}
+
+	if result.err != nil {
+		handlePipelineErr(c, result.err)
+		return
+	}
+	c.JSON(http.StatusOK, result.pipeline)
+}
+
+func logBackgroundWebhookCreate(repoFullName string, done <-chan pipelineCreateResult) {
+	result := <-done
+	if result.err == nil || errors.Is(result.err, pipeline.ErrFiltered) {
+		return
+	}
+	log.Error().Err(result.err).Str("repo", repoFullName).Msg("could not create pipeline from webhook")
 }
 
 func getRepoFromToken(store store.Store, t *token.Token) (*model.Repo, error) {

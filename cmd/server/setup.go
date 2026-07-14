@@ -251,6 +251,7 @@ func setupEvilGlobals(ctx context.Context, c *cli.Command, s store.Store) (err e
 	server.Config.Server.RootPath = rootPath
 	server.Config.Server.CustomCSSFile = strings.TrimSpace(c.String("custom-css-file"))
 	server.Config.Server.CustomJsFile = strings.TrimSpace(c.String("custom-js-file"))
+	server.Config.Server.WebhookSyncTimeout = c.Duration("webhook-sync-timeout")
 	server.Config.Pipeline.Networks = c.StringSlice("network")
 	server.Config.Pipeline.Volumes = c.StringSlice("volume")
 	server.Config.WebUI.EnableSwagger = c.Bool("enable-swagger")

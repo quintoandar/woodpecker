@@ -53,6 +53,7 @@ var Config = struct {
 		RootPath            string
 		CustomCSSFile       string
 		CustomJsFile        string
+		WebhookSyncTimeout  time.Duration
 	}
 	Agent struct {
 		DisableUserRegisteredAgentRegistration bool
