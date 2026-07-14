@@ -102,7 +102,7 @@ var flags = append([]cli.Flag{
 	&cli.DurationFlag{
 		Sources: cli.EnvVars("WOODPECKER_WEBHOOK_SYNC_TIMEOUT"),
 		Name:    "webhook-sync-timeout",
-		Usage:   "max time to wait for pipeline creation triggered by an incoming webhook before responding 202 Accepted and finishing it in the background; 0 disables the fallback and always responds synchronously",
+		Usage:   "max time to wait for pipeline creation triggered by an incoming webhook before responding 202 Accepted and finishing it in the background; 0 waits for creation to finish before responding (still subject to the 2m background create cap)",
 		Value:   5 * time.Second,
 	},
 	&cli.StringFlag{
