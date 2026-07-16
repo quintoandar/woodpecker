@@ -58,14 +58,13 @@ func (f *forgeFetcher) Fetch(ctx context.Context, forge forge.Forge, user *model
 	// try to fetch multiple times
 	for i := 0; i < int(f.retryCount); i++ {
 		files, err = ffc.fetch(ctx, strings.TrimSpace(repo.Config))
-		if err != nil {
-			log.Trace().Err(err).Msgf("Fetching config files: Attempt #%d failed", i+1)
-		} else {
-			break
+		if err == nil {
+			return files, nil
 		}
+		log.Trace().Err(err).Msgf("Fetching config files: Attempt #%d failed", i+1)
 	}
 
-	return
+	return files, err
 }
 
 type forgeFetcherContext struct {
