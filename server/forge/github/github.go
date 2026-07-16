@@ -268,53 +268,7 @@ func (c *client) File(ctx context.Context, u *model.User, r *model.Repo, b *mode
 }
 
 func (c *client) Dir(ctx context.Context, u *model.User, r *model.Repo, b *model.Pipeline, f string) ([]*forge_types.FileMeta, error) {
-	client := c.newClientToken(ctx, u.AccessToken)
-
-	opts := new(github.RepositoryContentGetOptions)
-	opts.Ref = b.Commit
-	_, data, resp, err := client.Repositories.GetContents(ctx, r.Owner, r.Name, f, opts)
-	if resp != nil && resp.StatusCode == http.StatusNotFound {
-		return nil, errors.Join(err, &forge_types.ErrConfigNotFound{Configs: []string{f}})
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	fc := make(chan *forge_types.FileMeta)
-	errChan := make(chan error)
-
-	for _, file := range data {
-		go func(path string) {
-			content, err := c.File(ctx, u, r, b, path)
-			if err != nil {
-				if errors.Is(err, &forge_types.ErrConfigNotFound{}) {
-					err = fmt.Errorf("git tree reported existence of file but we got: %s", err.Error())
-				}
-				errChan <- err
-			} else {
-				fc <- &forge_types.FileMeta{
-					Name: path,
-					Data: content,
-				}
-			}
-		}(f + "/" + *file.Name)
-	}
-
-	var files []*forge_types.FileMeta
-
-	for i := 0; i < len(data); i++ {
-		select {
-		case err := <-errChan:
-			return nil, err
-		case fileMeta := <-fc:
-			files = append(files, fileMeta)
-		}
-	}
-
-	close(fc)
-	close(errChan)
-
-	return files, nil
+	return c.dirGraphQL(ctx, u, r, b, f)
 }
 
 func (c *client) PullRequests(ctx context.Context, u *model.User, r *model.Repo, p *model.ListOptions) ([]*model.PullRequest, error) {
