@@ -27,6 +27,7 @@ require (
 	github.com/gitsight/go-vcsurl v1.0.1
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/go-viper/mapstructure/v2 v2.5.0
+	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/go-github/v88 v88.0.0
 	github.com/hashicorp/go-hclog v1.6.3

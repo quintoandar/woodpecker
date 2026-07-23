@@ -1122,9 +1122,24 @@ Comma-separated list of hosts that are allowed to be contacted by extensions. Po
 ### FORGE_TIMEOUT
 
 - Name: `WOODPECKER_FORGE_TIMEOUT`
-- Default: 5s
+- Default: 15s
 
 Specify timeout when fetching the Woodpecker configuration from forge. See <https://pkg.go.dev/time#ParseDuration> for syntax reference.
+
+GitHub webhooks must receive a 2xx response within **10 seconds** or the delivery is marked timed out. Raising this value is only safe when [`WOODPECKER_WEBHOOK_SYNC_TIMEOUT`](#webhook_sync_timeout) is **non-zero** (default 5s): Woodpecker acknowledges the webhook quickly (or after the sync wait) and continues forge config fetch in the background. Do **not** set a long forge timeout with `WOODPECKER_WEBHOOK_SYNC_TIMEOUT=0`, or GitHub may time out the delivery. Keep the sync timeout itself under GitHub's ~10s budget (for example do not set it to 15s).
+
+For monorepos with many files under `.woodpecker/`, 15–30s is a reasonable forge-timeout range once async webhook ack is in place.
+
+---
+
+### WEBHOOK_SYNC_TIMEOUT
+
+- Name: `WOODPECKER_WEBHOOK_SYNC_TIMEOUT`
+- Default: 5s
+
+Maximum time to wait for pipeline creation triggered by an incoming webhook before responding **202 Accepted** and finishing creation in the background. Set to `0` to wait for creation to finish before responding (still subject to the 2m background create cap).
+
+This exists so forge providers with a hard webhook response deadline (GitHub: 10s) do not mark deliveries as timed out when config fetch or pipeline setup is slow. Background creation is capped at 2 minutes.
 
 ---
 

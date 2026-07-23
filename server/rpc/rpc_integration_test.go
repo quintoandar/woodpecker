@@ -582,7 +582,6 @@ func TestRPCLog(t *testing.T) {
 		mockStore.On("AgentFind", int64(1)).Return(agent, nil)
 		mockStore.On("GetPipeline", int64(20)).Return(pipeline, nil)
 		mockStore.On("GetRepo", int64(10)).Return(defaultRepo(), nil)
-		mockStore.On("AgentUpdate", mock.Anything).Return(nil)
 		mockLogStore.On("LogAppend", mock.Anything, mock.Anything).Return(nil)
 
 		rpcInst := newTestRPC(t, mockStore, nil)
@@ -613,7 +612,6 @@ func TestRPCLog(t *testing.T) {
 		mockStore.On("AgentFind", int64(1)).Return(agent, nil)
 		mockStore.On("GetPipeline", int64(20)).Return(pipeline, nil)
 		mockStore.On("GetRepo", int64(10)).Return(defaultRepo(), nil)
-		mockStore.On("AgentUpdate", mock.Anything).Return(nil)
 		mockLogStore.On("LogAppend", mock.Anything, mock.Anything).Return(nil)
 
 		rpcInst := newTestRPC(t, mockStore, nil)
@@ -642,7 +640,6 @@ func TestRPCLog(t *testing.T) {
 		mockStore.On("AgentFind", int64(1)).Return(agent, nil)
 		mockStore.On("GetPipeline", int64(20)).Return(pipeline, nil)
 		mockStore.On("GetRepo", int64(10)).Return(defaultRepo(), nil)
-		mockStore.On("AgentUpdate", mock.Anything).Return(nil)
 		mockLogStore.On("LogAppend", mock.Anything, mock.Anything).Return(nil)
 
 		rpcInst := newTestRPC(t, mockStore, nil)
@@ -671,7 +668,6 @@ func TestRPCLog(t *testing.T) {
 		mockStore.On("AgentFind", int64(1)).Return(agent, nil)
 		mockStore.On("GetPipeline", int64(20)).Return(pipeline, nil)
 		mockStore.On("GetRepo", int64(10)).Return(defaultRepo(), nil)
-		mockStore.On("AgentUpdate", mock.Anything).Return(nil)
 		mockLogStore.On("LogAppend", mock.Anything, mock.Anything).Return(nil)
 
 		rpcInst := newTestRPC(t, mockStore, nil)
@@ -817,7 +813,6 @@ func TestRPCLog(t *testing.T) {
 		mockStore.On("AgentFind", int64(1)).Return(agent, nil)
 		mockStore.On("GetPipeline", int64(20)).Return(pipeline, nil)
 		mockStore.On("GetRepo", int64(10)).Return(defaultRepo(), nil)
-		mockStore.On("AgentUpdate", mock.Anything).Return(nil)
 
 		rpcInst := newTestRPC(t, mockStore, nil)
 		ctx := context.WithValue(t.Context(), agentIDKey, int64(1))

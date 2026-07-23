@@ -455,11 +455,6 @@ func (s *RPC) Log(c context.Context, stepUUID string, rpcLogEntries []*rpc.LogEn
 		return fmt.Errorf("can not alter logs: %w", err)
 	}
 
-	err = s.updateAgentLastWork(agent)
-	if err != nil {
-		return err
-	}
-
 	var logEntries []*model.LogEntry
 
 	for _, rpcLogEntry := range rpcLogEntries {
