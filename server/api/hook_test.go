@@ -30,15 +30,15 @@ import (
 )
 
 type hookFixture struct {
-	c              *gin.Context
-	w              *httptest.ResponseRecorder
-	manager        *mocks_services.Manager
-	forge          *mocks_forge.Forge
-	store          *mocks_store.Store
-	configService  *mocks_config_service.Service
-	user           *model.User
-	repo           *model.Repo
-	pipeline       *model.Pipeline
+	c             *gin.Context
+	w             *httptest.ResponseRecorder
+	manager       *mocks_services.Manager
+	forge         *mocks_forge.Forge
+	store         *mocks_store.Store
+	configService *mocks_config_service.Service
+	user          *model.User
+	repo          *model.Repo
+	pipeline      *model.Pipeline
 }
 
 func newHookFixture(t *testing.T, syncTimeout time.Duration) *hookFixture {
@@ -159,7 +159,7 @@ func TestHookAsyncAcceptedWhenCreateExceedsSyncTimeout(t *testing.T) {
 func TestHookBackgroundCreateIgnoresRequestContextCancel(t *testing.T) {
 	f := newHookFixture(t, 30*time.Millisecond)
 
-	reqCtx, reqCancel := context.WithCancel(context.Background())
+	reqCtx, reqCancel := context.WithCancelCause(context.Background())
 	f.c.Request = f.c.Request.WithContext(reqCtx)
 
 	var sawLiveCtx sync.WaitGroup
@@ -168,11 +168,12 @@ func TestHookBackgroundCreateIgnoresRequestContextCancel(t *testing.T) {
 
 	f.configService.On("Fetch", mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
 		Run(func(args mock.Arguments) {
-			ctx := args.Get(0).(context.Context)
-			reqCancel()
+			ctx, ok := args.Get(0).(context.Context)
+			require.True(t, ok)
+			reqCancel(nil)
 			select {
 			case <-ctx.Done():
-				t.Errorf("background create context was cancelled by request end")
+				t.Errorf("background create context was canceled by request end")
 			case <-time.After(80 * time.Millisecond):
 				sawLiveCtx.Done()
 			}
