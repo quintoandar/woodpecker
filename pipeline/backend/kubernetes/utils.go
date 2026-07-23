@@ -20,22 +20,43 @@ import (
 	"regexp"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
+	kube_core_v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	client_cmd "k8s.io/client-go/tools/clientcmd"
-
-	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
+	kube_client_cmd "k8s.io/client-go/tools/clientcmd"
 )
 
+const maxDNSLabelLen = 63
+
 var (
-	dnsPattern = regexp.MustCompile(`^[a-z0-9]` + // must start with
-		`([-a-z0-9]*[a-z0-9])?` + // inside can als contain -
-		`(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, // allow the same pattern as before with dots in between but only one dot
+	dnsPattern = regexp.MustCompile(
+		`^[a-z0-9]` + // must start with
+			`([-a-z0-9]*[a-z0-9])?` + // inside can als contain -
+			`(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`, // allow the same pattern as before with dots in between but only one dot
 	)
+	dnsLabelPattern         = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 	dnsDisallowedCharacters = regexp.MustCompile(`[^-^.a-z0-9]+`)
 	ErrDNSPatternInvalid    = errors.New("name is not a valid kubernetes DNS name")
 )
+
+func getHostnameOrEmpty(name string) string {
+	clean, _ := toDNSName(name)
+	if clean == "" {
+		clean = strings.ToLower(name)
+	}
+	clean = strings.ReplaceAll(clean, ".", "-")
+
+	if len(clean) > maxDNSLabelLen {
+		clean = clean[:maxDNSLabelLen]
+	}
+
+	clean = strings.Trim(clean, "-")
+
+	if dnsLabelPattern.MatchString(clean) {
+		return clean
+	}
+	return ""
+}
 
 func dnsName(i string) (string, error) {
 	res := strings.ToLower(strings.ReplaceAll(i, "_", "-"))
@@ -55,7 +76,7 @@ func toDNSName(in string) (string, error) {
 	return dnsName(almostDNS)
 }
 
-func isImagePullBackOffState(pod *v1.Pod) bool {
+func isImagePullBackOffState(pod *kube_core_v1.Pod) bool {
 	for _, containerState := range pod.Status.ContainerStatuses {
 		if containerState.State.Waiting != nil {
 			if containerState.State.Waiting.Reason == "ImagePullBackOff" {
@@ -67,7 +88,7 @@ func isImagePullBackOffState(pod *v1.Pod) bool {
 	return false
 }
 
-func isInvalidImageName(pod *v1.Pod) bool {
+func isInvalidImageName(pod *kube_core_v1.Pod) bool {
 	for _, containerState := range pod.Status.ContainerStatuses {
 		if containerState.State.Waiting != nil {
 			if containerState.State.Waiting.Reason == "InvalidImageName" {
@@ -87,7 +108,7 @@ func getClientOutOfCluster() (kubernetes.Interface, error) {
 	}
 
 	// use the current context in kube config
-	config, err := client_cmd.BuildConfigFromFlags("", kubeConfigPath)
+	config, err := kube_client_cmd.BuildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		return nil, err
 	}
@@ -103,10 +124,6 @@ func getClientInsideOfCluster() (kubernetes.Interface, error) {
 	}
 
 	return kubernetes.NewForConfig(config)
-}
-
-func isService(step *types.Step) bool {
-	return step.Type == types.StepTypeService || (step.Detached && dnsPattern.FindStringIndex(step.Name) != nil)
 }
 
 func newBool(val bool) *bool {

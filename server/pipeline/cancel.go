@@ -17,18 +17,18 @@ package pipeline
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/rs/zerolog/log"
 
 	"go.woodpecker-ci.org/woodpecker/v3/server"
 	"go.woodpecker-ci.org/woodpecker/v3/server/forge"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
-	"go.woodpecker-ci.org/woodpecker/v3/server/queue"
 	"go.woodpecker-ci.org/woodpecker/v3/server/store"
 )
 
 // Cancel the pipeline and returns the status.
-func Cancel(ctx context.Context, _forge forge.Forge, store store.Store, repo *model.Repo, user *model.User, pipeline *model.Pipeline) error {
+func Cancel(ctx context.Context, _forge forge.Forge, store store.Store, repo *model.Repo, user *model.User, pipeline *model.Pipeline, cancelInfo *model.CancelInfo) error {
 	if pipeline.Status != model.StatusRunning && pipeline.Status != model.StatusPending && pipeline.Status != model.StatusBlocked {
 		return &ErrBadRequest{Msg: "Cannot cancel a non-running or non-pending or non-blocked pipeline"}
 	}
@@ -38,33 +38,19 @@ func Cancel(ctx context.Context, _forge forge.Forge, store store.Store, repo *mo
 		return &ErrNotFound{Msg: err.Error()}
 	}
 
-	// First cancel/evict steps in the queue in one go
-	var (
-		stepsToCancel []string
-		stepsToEvict  []string
-	)
-	for _, workflow := range workflows {
-		if workflow.State == model.StatusRunning {
-			stepsToCancel = append(stepsToCancel, fmt.Sprint(workflow.ID))
-		}
-		if workflow.State == model.StatusPending {
-			stepsToEvict = append(stepsToEvict, fmt.Sprint(workflow.ID))
+	// First cancel/evict the running and pending workflows from the queue
+	var workflowsToCancel []string
+	for _, w := range workflows {
+		if w.State == model.StatusRunning || w.State == model.StatusPending {
+			workflowsToCancel = append(workflowsToCancel, fmt.Sprint(w.ID))
 		}
 	}
 
-	if len(stepsToEvict) != 0 {
-		if err := server.Config.Services.Queue.EvictAtOnce(ctx, stepsToEvict); err != nil {
-			log.Error().Err(err).Msgf("queue: evict_at_once: %v", stepsToEvict)
-		}
-		if err := server.Config.Services.Queue.ErrorAtOnce(ctx, stepsToEvict, queue.ErrCancel); err != nil {
-			log.Error().Err(err).Msgf("queue: evict_at_once: %v", stepsToEvict)
-		}
+	if err := server.Config.Services.Scheduler.CancelWorkflows(ctx, workflowsToCancel); err != nil {
+		log.Error().Err(err).Msgf("cancel workflows: %v", workflowsToCancel)
 	}
-	if len(stepsToCancel) != 0 {
-		if err := server.Config.Services.Queue.ErrorAtOnce(ctx, stepsToCancel, queue.ErrCancel); err != nil {
-			log.Error().Err(err).Msgf("queue: evict_at_once: %v", stepsToCancel)
-		}
-	}
+
+	hasPendingOnly := true
 
 	// Then update the DB status for pending pipelines
 	// Running ones will be set when the agents stop on the cancel signal
@@ -73,17 +59,23 @@ func Cancel(ctx context.Context, _forge forge.Forge, store store.Store, repo *mo
 			if _, err = UpdateWorkflowToStatusSkipped(store, *workflow); err != nil {
 				log.Error().Err(err).Msgf("cannot update workflow with id %d state", workflow.ID)
 			}
+		} else {
+			hasPendingOnly = false
 		}
 		for _, step := range workflow.Children {
 			if step.State == model.StatusPending {
-				if _, err = UpdateStepToStatusSkipped(store, *step, 0); err != nil {
+				if _, err = UpdateStepToStatusSkipped(store, *step, 0, model.StatusCanceled); err != nil {
 					log.Error().Err(err).Msgf("cannot update workflow with id %d state", workflow.ID)
 				}
 			}
 		}
 	}
 
-	killedPipeline, err := UpdateToStatusKilled(store, *pipeline)
+	plState := model.StatusKilled
+	if hasPendingOnly {
+		plState = model.StatusCanceled
+	}
+	killedPipeline, err := UpdateToStatusKilled(store, *pipeline, cancelInfo, plState)
 	if err != nil {
 		log.Error().Err(err).Msgf("UpdateToStatusKilled: %v", pipeline)
 		return err
@@ -94,7 +86,10 @@ func Cancel(ctx context.Context, _forge forge.Forge, store store.Store, repo *mo
 	if killedPipeline.Workflows, err = store.WorkflowGetTree(killedPipeline); err != nil {
 		return err
 	}
-	publishToTopic(killedPipeline, repo)
+
+	if err := server.Config.Services.Scheduler.PublishPipelineEvent(ctx, repo, killedPipeline); err != nil {
+		log.Error().Err(err).Msg("could not push pipeline status change to pubsub provider")
+	}
 
 	return nil
 }
@@ -108,13 +103,7 @@ func cancelPreviousPipelines(
 	user *model.User,
 ) error {
 	// check this event should cancel previous pipelines
-	eventIncluded := false
-	for _, ev := range repo.CancelPreviousPipelineEvents {
-		if ev == pipeline.Event {
-			eventIncluded = true
-			break
-		}
-	}
+	eventIncluded := slices.Contains(repo.CancelPreviousPipelineEvents, pipeline.Event)
 	if !eventIncluded {
 		return nil
 	}
@@ -152,7 +141,9 @@ func cancelPreviousPipelines(
 			continue
 		}
 
-		if err = Cancel(ctx, _forge, _store, repo, user, active); err != nil {
+		if err = Cancel(ctx, _forge, _store, repo, user, active, &model.CancelInfo{
+			SupersededBy: pipeline.Number,
+		}); err != nil {
 			log.Error().
 				Err(err).
 				Str("ref", active.Ref).

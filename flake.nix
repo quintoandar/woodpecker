@@ -15,7 +15,7 @@
         devShells.default =
           with pkgs;
           let
-            go = go_1_24;
+            go = go_1_26;
           in
           pkgs.mkShell {
             buildInputs = [
@@ -29,15 +29,15 @@
               # frontend
               nodejs_24
               pnpm
-              nodePackages.typescript
-              nodePackages.typescript-language-server
+              typescript
+              typescript-language-server
 
               # backend
               go
               glibc.static
               gofumpt
               golangci-lint
-              go-mockery_2
+              go-mockery
               protobuf
               sqlite
               go-swag # for generate-openapi
@@ -45,6 +45,9 @@
               protoc-gen-go
               protoc-gen-go-grpc
               gcc
+
+              # docs
+              graphviz
             ];
             CFLAGS = "-I${pkgs.glibc.dev}/include";
             LDFLAGS = "-L${pkgs.glibc}/lib";

@@ -21,6 +21,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	"go.woodpecker-ci.org/woodpecker/v3/server/services/utils/hostmatcher"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/constant"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/logger"
 )
@@ -70,7 +71,7 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_SERVER_ADDR"),
 		Name:    "server-addr",
-		Usage:   "server address",
+		Usage:   "configures the HTTP listener, supports unix socket via unix:// prefix",
 		Value:   ":8000",
 	},
 	&cli.StringFlag{
@@ -99,22 +100,28 @@ var flags = append([]cli.Flag{
 		Name:    "custom-js-file",
 		Usage:   "file path for the server to serve a custom .JS file, used for customizing the UI",
 	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_ASYNC_REPOSITORY_UPDATE"),
+		Name:    "async-repository-update",
+		Usage:   "if true fetch repository permissions asynchronous, impacts performance if there are many repositories with possible tradeoff in consistency",
+	},
 	&cli.DurationFlag{
 		Sources: cli.EnvVars("WOODPECKER_WEBHOOK_SYNC_TIMEOUT"),
 		Name:    "webhook-sync-timeout",
-		Usage:   "max time to wait for pipeline creation triggered by an incoming webhook before responding 202 Accepted and finishing it in the background; 0 waits for creation to finish before responding (still subject to the 2m background create cap)",
+		Usage:   "max time to wait for pipeline creation triggered by an incoming webhook before responding 202 Accepted and finishing it in the background; 0 disables the fallback and always responds synchronously",
 		Value:   5 * time.Second,
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_GRPC_ADDR"),
 		Name:    "grpc-addr",
-		Usage:   "grpc address",
+		Usage:   "grpc socket server opens, by default on all IPs via port 9000, use unix:// prefix for unix socket",
 		Value:   ":9000",
 	},
 	&cli.StringFlag{
 		Sources: cli.NewValueSourceChain(
 			cli.File(os.Getenv("WOODPECKER_GRPC_SECRET_FILE")),
-			cli.EnvVar("WOODPECKER_GRPC_SECRET")),
+			cli.EnvVar("WOODPECKER_GRPC_SECRET"),
+		),
 		Name:  "grpc-secret",
 		Usage: "grpc jwt secret",
 		Value: "secret",
@@ -128,20 +135,35 @@ var flags = append([]cli.Flag{
 		Usage:   "metrics server address",
 		Value:   "",
 	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_STEP_LEVEL_METRICS"),
+		Name:    "step-level-metrics",
+		Usage:   "enable step-level metrics",
+		Value:   true,
+	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_ADMIN"),
 		Name:    "admin",
 		Usage:   "list of admin users",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_ORGS"),
 		Name:    "orgs",
 		Usage:   "list of approved organizations",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_REPO_OWNERS"),
 		Name:    "repo-owners",
 		Usage:   "Repositories by those owners will be allowed to be used in woodpecker",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.BoolFlag{
 		Sources: cli.EnvVars("WOODPECKER_OPEN"),
@@ -170,6 +192,9 @@ var flags = append([]cli.Flag{
 		Name:    "default-cancel-previous-pipeline-events",
 		Usage:   "List of event names that will be canceled when a new pipeline for the same context (tag, branch) is created.",
 		Value:   []string{"push", "pull_request"},
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_DEFAULT_CLONE_PLUGIN", "WOODPECKER_DEFAULT_CLONE_IMAGE"),
@@ -194,6 +219,9 @@ var flags = append([]cli.Flag{
 		Sources: cli.EnvVars("WOODPECKER_DEFAULT_WORKFLOW_LABELS"),
 		Name:    "default-workflow-labels",
 		Usage:   "The default label filter to set for workflows that has no label filter set. By default workflows will be allowed to run on any agent, if not specified in the workflow.",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.DurationFlag{
 		Sources: cli.EnvVars("WOODPECKER_SESSION_EXPIRES"),
@@ -205,16 +233,25 @@ var flags = append([]cli.Flag{
 		Sources: cli.EnvVars("WOODPECKER_PLUGINS_PRIVILEGED"),
 		Name:    "plugins-privileged",
 		Usage:   "Allow plugins to run in privileged mode, if environment variable is defined but empty there will be none",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_PLUGINS_TRUSTED_CLONE"),
 		Name:    "plugins-trusted-clone",
 		Usage:   "Plugins which are trusted to handle Git credentials in clone steps",
 		Value:   constant.TrustedClonePlugins,
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_VOLUME"),
 		Name:    "volume",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_DOCKER_CONFIG"),
@@ -223,15 +260,22 @@ var flags = append([]cli.Flag{
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_ENVIRONMENT"),
 		Name:    "environment",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_NETWORK"),
 		Name:    "network",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringFlag{
 		Sources: cli.NewValueSourceChain(
 			cli.File(os.Getenv("WOODPECKER_AGENT_SECRET_FILE")),
-			cli.EnvVar("WOODPECKER_AGENT_SECRET")),
+			cli.EnvVar("WOODPECKER_AGENT_SECRET"),
+		),
 		Name:  "agent-secret",
 		Usage: "server-agent shared password",
 		Config: cli.StringConfig{
@@ -249,9 +293,64 @@ var flags = append([]cli.Flag{
 		Usage:   "server-side enforcement policy on the minimum amount of time a client should wait before sending a keepalive ping.",
 	},
 	&cli.StringFlag{
-		Sources: cli.EnvVars("WOODPECKER_CONFIG_SERVICE_ENDPOINT"),
-		Name:    "config-service-endpoint",
-		Usage:   "url used for calling configuration service endpoint",
+		Sources: cli.EnvVars("WOODPECKER_CONFIG_EXTENSION_ENDPOINT", "WOODPECKER_CONFIG_SERVICE_ENDPOINT"), // TODO remove _SERVICE_ var in 4.0.0
+		Name:    "config-extension-endpoint",
+		Aliases: []string{"config-service-endpoint"}, // TODO: remove in v4.0.0
+		Usage:   "url used for calling global configuration service endpoint",
+	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_CONFIG_EXTENSION_EXCLUSIVE"),
+		Name:    "config-extension-exclusive",
+		Usage:   "whether global configuration service endpoint should be exclusive (skip forge)",
+	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_CONFIG_EXTENSION_NETRC"),
+		Name:    "config-extension-netrc",
+		Usage:   "whether global configuration extension should receive netrc data",
+	},
+	&cli.StringSliceFlag{
+		Sources: cli.EnvVars("WOODPECKER_DEFAULT_PIPELINE_CONFIGS"),
+		Name:    "default-pipeline-configs",
+		Usage:   "default pipeline config paths to check",
+		Value:   constant.DefaultConfigOrder,
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
+	},
+	&cli.StringSliceFlag{
+		Sources: cli.EnvVars("WOODPECKER_DEFAULT_PIPELINE_CONFIG_EXTENSIONS"),
+		Name:    "default-pipeline-config-extensions",
+		Usage:   "default pipeline config extensions when scanning a pipeline config directory",
+		Value:   []string{".yaml", ".yml"},
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
+	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_REGISTRY_EXTENSION_ENDPOINT"),
+		Name:    "registry-extension-endpoint",
+		Usage:   "url used for calling registry service endpoint",
+	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_REGISTRY_EXTENSION_NETRC"),
+		Name:    "registry-extension-netrc",
+		Usage:   "whether global registry extension should receive netrc data",
+	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_SECRET_EXTENSION_ENDPOINT"),
+		Name:    "secret-extension-endpoint",
+		Usage:   "url used for calling external secret service endpoint",
+	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_SECRET_EXTENSION_NETRC"),
+		Name:    "secret-extension-netrc",
+		Usage:   "include netrc credentials in requests to secret service endpoint",
+	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_EXTENSIONS_ALLOWED_HOSTS"),
+		Name:    "extensions-allowed-hosts",
+		Usage:   "Hosts that are allowed to be contacted by extensions",
+		Value:   hostmatcher.MatchBuiltinExternal,
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_DATABASE_DRIVER"),
@@ -263,7 +362,8 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.NewValueSourceChain(
 			cli.File(os.Getenv("WOODPECKER_DATABASE_DATASOURCE_FILE")),
-			cli.EnvVar("WOODPECKER_DATABASE_DATASOURCE")),
+			cli.EnvVar("WOODPECKER_DATABASE_DATASOURCE"),
+		),
 		Name:    "db-datasource",
 		Aliases: []string{"datasource"}, // TODO: remove in v4.0.0
 		Usage:   "database driver configuration string",
@@ -275,7 +375,8 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.NewValueSourceChain(
 			cli.File(os.Getenv("WOODPECKER_PROMETHEUS_AUTH_TOKEN_FILE")),
-			cli.EnvVar("WOODPECKER_PROMETHEUS_AUTH_TOKEN")),
+			cli.EnvVar("WOODPECKER_PROMETHEUS_AUTH_TOKEN"),
+		),
 		Name:  "prometheus-auth-token",
 		Usage: "token to secure prometheus metrics endpoint",
 		Config: cli.StringConfig{
@@ -309,16 +410,22 @@ var flags = append([]cli.Flag{
 		Usage:   "Disable version check in admin web ui.",
 		Name:    "skip-version-check",
 	},
+	&cli.UintFlag{
+		Sources: cli.EnvVars("WOODPECKER_MAX_PIPELINE_LOG_LINE_COUNT"),
+		Usage:   "Maximum number of lines to show in a pipeline log, defaults to 5000.",
+		Name:    "max-pipeline-log-line-count",
+		Value:   5000,
+	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_LOG_STORE"),
 		Name:    "log-store",
-		Usage:   "log store to use ('database' or 'file')",
+		Usage:   "log store to use ('database', 'addon' or 'file')",
 		Value:   "database",
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_LOG_STORE_FILE_PATH"),
 		Name:    "log-store-file-path",
-		Usage:   "directory used for file based log storage",
+		Usage:   "directory used for file based log storage or addon executable file path",
 	},
 	//
 	// backend options for pipeline compiler
@@ -338,13 +445,20 @@ var flags = append([]cli.Flag{
 		Usage:   "if set, pass the environment variable down as \"HTTPS_PROXY\" to steps",
 		Name:    "backend-https-proxy",
 	},
+	// setting to have non breaking behavior till v4.0.0
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_FORCE_IGNORE_SERVICE_FAILURE"),
+		Name:    "force-ignore-service-failure",
+		Usage:   "From v3.14.0 onwards, detached steps and services report their status back. To preserve the old behavior, service failures are ignored by default until v4.0.0.",
+		Value:   true,
+	},
 	//
 	// resource limit parameters
 	//
 	&cli.DurationFlag{
 		Sources: cli.EnvVars("WOODPECKER_FORGE_TIMEOUT"),
 		Name:    "forge-timeout",
-		Usage:   "timeout when fetching the Woodpecker configuration from a Forge",
+		Usage:   "how many seconds before timeout when fetching the Woodpecker configuration from a Forge",
 		Value:   time.Second * 15,
 	},
 	&cli.UintFlag{
@@ -370,14 +484,16 @@ var flags = append([]cli.Flag{
 				"WOODPECKER_GITEA_CLIENT_FILE",
 				"WOODPECKER_FORGEJO_CLIENT_FILE",
 				"WOODPECKER_BITBUCKET_CLIENT_FILE",
-				"WOODPECKER_BITBUCKET_DC_CLIENT_ID_FILE")),
+				"WOODPECKER_BITBUCKET_DC_CLIENT_ID_FILE",
+			)),
 			cli.EnvVar("WOODPECKER_FORGE_CLIENT"),
 			cli.EnvVar("WOODPECKER_GITHUB_CLIENT"),
 			cli.EnvVar("WOODPECKER_GITLAB_CLIENT"),
 			cli.EnvVar("WOODPECKER_GITEA_CLIENT"),
 			cli.EnvVar("WOODPECKER_FORGEJO_CLIENT"),
 			cli.EnvVar("WOODPECKER_BITBUCKET_CLIENT"),
-			cli.EnvVar("WOODPECKER_BITBUCKET_DC_CLIENT_ID")),
+			cli.EnvVar("WOODPECKER_BITBUCKET_DC_CLIENT_ID"),
+		),
 		Name:  "forge-oauth-client",
 		Usage: "oauth2 client id",
 		Config: cli.StringConfig{
@@ -401,7 +517,8 @@ var flags = append([]cli.Flag{
 			cli.EnvVar("WOODPECKER_GITEA_SECRET"),
 			cli.EnvVar("WOODPECKER_FORGEJO_SECRET"),
 			cli.EnvVar("WOODPECKER_BITBUCKET_SECRET"),
-			cli.EnvVar("WOODPECKER_BITBUCKET_DC_CLIENT_SECRET")),
+			cli.EnvVar("WOODPECKER_BITBUCKET_DC_CLIENT_SECRET"),
+		),
 		Name:  "forge-oauth-secret",
 		Usage: "oauth2 client secret",
 		Config: cli.StringConfig{
@@ -417,7 +534,8 @@ var flags = append([]cli.Flag{
 			"WOODPECKER_GITLAB_SKIP_VERIFY",
 			"WOODPECKER_GITEA_SKIP_VERIFY",
 			"WOODPECKER_FORGEJO_SKIP_VERIFY",
-			"WOODPECKER_BITBUCKET_SKIP_VERIFY"),
+			"WOODPECKER_BITBUCKET_SKIP_VERIFY",
+		),
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_EXPERT_FORGE_OAUTH_HOST"),
@@ -495,7 +613,8 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.NewValueSourceChain(
 			cli.File(os.Getenv("WOODPECKER_BITBUCKET_DC_GIT_USERNAME_FILE")),
-			cli.EnvVar("WOODPECKER_BITBUCKET_DC_GIT_USERNAME")),
+			cli.EnvVar("WOODPECKER_BITBUCKET_DC_GIT_USERNAME"),
+		),
 		Name:  "bitbucket-dc-git-username",
 		Usage: "Bitbucket DataCenter/Server service account username",
 		Config: cli.StringConfig{
@@ -505,12 +624,18 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.NewValueSourceChain(
 			cli.File(os.Getenv("WOODPECKER_BITBUCKET_DC_GIT_PASSWORD_FILE")),
-			cli.EnvVar("WOODPECKER_BITBUCKET_DC_GIT_PASSWORD")),
+			cli.EnvVar("WOODPECKER_BITBUCKET_DC_GIT_PASSWORD"),
+		),
 		Name:  "bitbucket-dc-git-password",
 		Usage: "Bitbucket DataCenter/Server service account password",
 		Config: cli.StringConfig{
 			TrimSpace: true,
 		},
+	},
+	&cli.BoolFlag{ // TODO: Remove this feature flag in next major version
+		Sources: cli.EnvVars("WOODPECKER_BITBUCKET_DC_ENABLE_OAUTH2_SCOPE_PROJECT_ADMIN"),
+		Name:    "bitbucket-dc-oauth-enable-oauth2-scope-project-admin",
+		Usage:   "Bitbucket DataCenter/Server oauth2 scope should be configured to include PROJECT_ADMIN configuration.",
 	},
 	//
 	// development flags
@@ -535,7 +660,8 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.NewValueSourceChain(
 			cli.File(os.Getenv("WOODPECKER_ENCRYPTION_KEY_FILE")),
-			cli.EnvVar("WOODPECKER_ENCRYPTION_KEY")),
+			cli.EnvVar("WOODPECKER_ENCRYPTION_KEY"),
+		),
 		Name:  "encryption-raw-key",
 		Usage: "Raw encryption key",
 		Config: cli.StringConfig{

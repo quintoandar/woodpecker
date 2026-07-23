@@ -11,7 +11,13 @@
         <span>{{ pipeline.author }}</span>
       </div>
       <a
-        v-if="pipeline.event === 'pull_request' || pipeline.event === 'pull_request_closed'"
+        v-if="
+          // eslint-disable vue/html-indent
+          pipeline.event === 'pull_request' ||
+          pipeline.event === 'pull_request_closed' ||
+          pipeline.event === 'pull_request_metadata'
+          // eslint-enable vue/html-indent
+        "
         class="text-wp-link-100 hover:text-wp-link-200 flex min-w-0 items-center space-x-1"
         :href="pipeline.forge_url"
       >
@@ -104,7 +110,7 @@
                 'bg-wp-control-neutral-200': selectedStepId && selectedStepId === step.pid,
                 'mt-1': !singleConfig || (workflow.children && step.pid !== workflow.children[0].pid),
               }"
-              @click="$emit('update:selected-step-id', step.pid)"
+              @click="$emit('update:selectedStepId', step.pid)"
             >
               <PipelineStatusIcon :service="step.type === StepType.Service" :status="step.state" class="h-4! w-4!" />
               <span class="truncate">{{ step.name }}</span>
@@ -136,7 +142,7 @@ const props = defineProps<{
 }>();
 
 defineEmits<{
-  (event: 'update:selected-step-id', selectedStepId: number): void;
+  (event: 'update:selectedStepId', selectedStepId: number): void;
 }>();
 
 const pipeline = toRef(props, 'pipeline');

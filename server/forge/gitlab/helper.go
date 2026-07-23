@@ -19,8 +19,10 @@ import (
 	"crypto/tls"
 	"net/http"
 
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	gitlab "gitlab.com/gitlab-org/api/client-go/v2"
 	"golang.org/x/oauth2"
+
+	"go.woodpecker-ci.org/woodpecker/v3/shared/httputil"
 )
 
 const (
@@ -33,10 +35,13 @@ func newClient(url, accessToken string, skipVerify bool) (*gitlab.Client, error)
 	return gitlab.NewAuthSourceClient(gitlab.OAuthTokenSource{
 		TokenSource: oauth2.StaticTokenSource(&oauth2.Token{AccessToken: accessToken}),
 	}, gitlab.WithBaseURL(url), gitlab.WithHTTPClient(&http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: skipVerify},
-			Proxy:           http.ProxyFromEnvironment,
-		},
+		Transport: httputil.NewUserAgentRoundTripper(
+			&http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: skipVerify},
+				Proxy:           http.ProxyFromEnvironment,
+			},
+			"forge-gitlab",
+		),
 	}))
 }
 

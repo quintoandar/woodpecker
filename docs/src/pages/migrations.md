@@ -1,11 +1,34 @@
+<!-- markdownlint-disable no-duplicate-heading -->
+
 # Migrations
 
 To enhance the usability of Woodpecker and meet evolving security standards, occasional migrations are necessary. While we aim to minimize these changes, some are unavoidable. If you experience significant issues during a migration to a new version, please let us know so maintainers can reassess the updates.
 
 ## `next`
 
+### User-facing migrations
+
 - (Kubernetes) Deprecated `step` label on pod in favor of new namespaced label `woodpecker-ci.org/step`. The `step` label will be removed in a future update.
 - deprecated `CI_COMMIT_AUTHOR_AVATAR` and `CI_PREV_COMMIT_AUTHOR_AVATAR` env vars in favor of `CI_PIPELINE_AVATAR` and `CI_PREV_PIPELINE_AVATAR`
+- deprecated `runs_on` workflow property in favor of `when.status`.
+
+### Admin-facing migrations
+
+- changed env var `WOODPECKER_CONFIG_SERVICE_ENDPOINT` to `WOODPECKER_CONFIG_EXTENSION_ENDPOINT`
+
+#### Extensions
+
+Extension HTTP calls (as of now the configuration extension) will by default only be allowed to contact external hosts. Set `WOODPECKER_EXTENSIONS_ALLOWED_HOSTS` accordingly to allow additional hosts as needed.
+
+### API changes
+
+- The pipeline model has been changed to use nested objects grouped based on the event (e.g. instead of a generic `title` it now uses `pr.title`). Following properties are deprecated and should be replaced by the their new counterparts:
+  - `sender` =>
+    - `cron` for cron events
+
+### Internal changes
+
+- Renamed the server flag `config-service-endpoint` to `config-extension-endpoint`
 
 ## 3.0.0
 
@@ -116,7 +139,6 @@ The following restructuring was done to achieve a more consistent grouping:
   Additionally, the description has been updated to reflect that these filters only apply to plugins ([#4069](https://github.com/woodpecker-ci/woodpecker/pull/4069)).
 
 - SDK changes:
-
   - The SDK fields `start_time`, `end_time`, `created_at`, `started_at`, `finished_at` and `reviewed_at` have been renamed to `started`, `finished`, `created`, `started`, `finished`, `reviewed` ([#3968](https://github.com/woodpecker-ci/woodpecker/pull/3968))
   - The `trusted` field of the repo model was changed from `boolean` to `object` ([#4025](https://github.com/woodpecker-ci/woodpecker/pull/4025))
 
@@ -233,7 +255,7 @@ Read more about it in [#4213](https://github.com/woodpecker-ci/woodpecker/pull/4
 
 ## 1.0.0
 
-- The signature used to verify extension calls (like those used for the [config-extension](/docs/administration/configuration/server#external-configuration-api)) done by the Woodpecker server switched from using a shared-secret HMac to an ed25519 key-pair. Read more about it at the [config-extensions](/docs/administration/configuration/server#external-configuration-api) documentation.
+- The signature used to verify extension calls (like those used for the [config-extension](/docs/next/usage/extensions/configuration-extension)) done by the Woodpecker server switched from using a shared-secret HMac to an ed25519 key-pair. Read more about it at the [config-extensions](/docs/next/usage/extensions/configuration-extension) documentation.
 - Refactored support for old agent filter labels and expressions. Learn how to use the new [filter](/docs/usage/workflow-syntax#labels)
 - Renamed step environment variable `CI_SYSTEM_ARCH` to `CI_SYSTEM_PLATFORM`. Same applies for the cli exec variable.
 - Renamed environment variables `CI_BUILD_*` and `CI_PREV_BUILD_*` to `CI_PIPELINE_*` and `CI_PREV_PIPELINE_*`, old ones are still available but deprecated
@@ -279,14 +301,12 @@ Read more about it in [#4213](https://github.com/woodpecker-ci/woodpecker/pull/4
 
 - Dropped support for `DRONE_*` environment variables. The according `WOODPECKER_*` variables must be used instead.
   Additionally some alternative namings have been removed to simplify maintenance:
-
   - `WOODPECKER_AGENT_SECRET` replaces `WOODPECKER_SECRET`, `DRONE_SECRET`, `WOODPECKER_PASSWORD`, `DRONE_PASSWORD` and `DRONE_AGENT_SECRET`.
   - `WOODPECKER_HOST` replaces `DRONE_HOST` and `DRONE_SERVER_HOST`.
   - `WOODPECKER_DATABASE_DRIVER` replaces `DRONE_DATABASE_DRIVER` and `DATABASE_DRIVER`.
   - `WOODPECKER_DATABASE_DATASOURCE` replaces `DRONE_DATABASE_DATASOURCE` and `DATABASE_CONFIG`.
 
 - Dropped support for `DRONE_*` environment variables in pipeline steps. Pipeline meta-data can be accessed with `CI_*` variables.
-
   - `CI_*` prefix replaces `DRONE_*`
   - `CI` value is now `woodpecker`
   - `DRONE=true` has been removed
@@ -316,7 +336,6 @@ Read more about it in [#4213](https://github.com/woodpecker-ci/woodpecker/pull/4
 - Default workspace base path has moved from `/drone` to `/woodpecker`
 
 - Default SQLite database location has changed:
-
   - `/var/lib/drone/drone.sqlite` -> `/var/lib/woodpecker/woodpecker.sqlite`
   - `drone.sqlite` -> `woodpecker.sqlite`
 

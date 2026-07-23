@@ -28,7 +28,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	gitlab "gitlab.com/gitlab-org/api/client-go/v2"
 	"golang.org/x/oauth2"
 
 	"go.woodpecker-ci.org/woodpecker/v3/server"
@@ -41,8 +41,8 @@ import (
 )
 
 const (
-	defaultScope = "api"
-	perPage      = 100
+	defaultScope   = "api"
+	defaultPerPage = 100
 )
 
 // Opts defines configuration options.
@@ -56,6 +56,7 @@ type Opts struct {
 
 // Gitlab implements "Forge" interface.
 type GitLab struct {
+	id                int64
 	url               string
 	oAuthClientID     string
 	oAuthClientSecret string
@@ -67,8 +68,9 @@ type GitLab struct {
 
 // New returns a Forge implementation that integrates with Gitlab, an open
 // source Git service. See https://gitlab.com
-func New(opts Opts) (forge.Forge, error) {
+func New(id int64, opts Opts) (forge.Forge, error) {
 	return &GitLab{
+		id:                id,
 		url:               opts.URL,
 		oAuthClientID:     opts.OAuthClientID,
 		oAuthClientSecret: opts.OAuthClientSecret,
@@ -176,50 +178,35 @@ func (g *GitLab) Refresh(ctx context.Context, user *model.User) (bool, error) {
 	return true, nil
 }
 
-// Auth authenticates the session and returns the forge user login for the given token.
-func (g *GitLab) Auth(ctx context.Context, token, _ string) (string, error) {
-	client, err := newClient(g.url, token, g.skipVerify)
-	if err != nil {
-		return "", err
-	}
-
-	login, _, err := client.Users.CurrentUser(gitlab.WithContext(ctx))
-	if err != nil {
-		return "", err
-	}
-	return login.Username, nil
-}
-
 // Teams fetches a list of team memberships from the forge.
-func (g *GitLab) Teams(ctx context.Context, user *model.User) ([]*model.Team, error) {
+func (g *GitLab) Teams(ctx context.Context, user *model.User, p *model.ListOptions) ([]*model.Team, error) {
 	client, err := newClient(g.url, user.AccessToken, g.skipVerify)
 	if err != nil {
 		return nil, err
 	}
 
-	teams := make([]*model.Team, 0, perPage)
+	perPage := min(p.PerPage, defaultPerPage)
 
-	for i := 1; true; i++ {
-		batch, _, err := client.Groups.ListGroups(&gitlab.ListGroupsOptions{
-			ListOptions:    gitlab.ListOptions{Page: i, PerPage: perPage},
-			AllAvailable:   gitlab.Ptr(false),
-			MinAccessLevel: gitlab.Ptr(gitlab.DeveloperPermissions), // TODO: check what's best here
-		}, gitlab.WithContext(ctx))
-		if err != nil {
-			return nil, err
-		}
+	groups, _, err := client.Groups.ListGroups(&gitlab.ListGroupsOptions{
+		ListOptions: gitlab.ListOptions{
+			Page:    int64(p.Page),
+			PerPage: int64(perPage),
+		},
+		AllAvailable:   gitlab.Ptr(false),
+		MinAccessLevel: gitlab.Ptr(gitlab.DeveloperPermissions), // TODO: check what's best here
+	}, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
 
-		for i := range batch {
-			teams = append(teams, &model.Team{
-				Login:  batch[i].Name,
-				Avatar: batch[i].AvatarURL,
+	teams := make([]*model.Team, 0, len(groups))
+	for i := range groups {
+		teams = append(
+			teams, &model.Team{
+				Login:  groups[i].Name,
+				Avatar: groups[i].AvatarURL,
 			},
-			)
-		}
-
-		if len(batch) < perPage {
-			break
-		}
+		)
 	}
 
 	return teams, nil
@@ -237,15 +224,21 @@ func (g *GitLab) getProject(ctx context.Context, client *gitlab.Client, forgeRem
 		if err != nil {
 			return nil, err
 		}
-		repo, _, err = client.Projects.GetProject(intID, nil, gitlab.WithContext(ctx))
+		repo, resp, err := client.Projects.GetProject(intID, nil, gitlab.WithContext(ctx))
+		if err != nil && resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil, errors.Join(err, forge_types.ErrRepoNotFound)
+		}
 		return repo, err
 	}
 
-	repo, _, err = client.Projects.GetProject(fmt.Sprintf("%s/%s", owner, name), nil, gitlab.WithContext(ctx))
+	repo, resp, err := client.Projects.GetProject(fmt.Sprintf("%s/%s", owner, name), nil, gitlab.WithContext(ctx))
+	if err != nil && resp != nil && resp.StatusCode == http.StatusNotFound {
+		return nil, errors.Join(err, forge_types.ErrRepoNotFound)
+	}
 	return repo, err
 }
 
-func (g *GitLab) getInheritedProjectMember(ctx context.Context, client *gitlab.Client, forgeRemoteID model.ForgeRemoteID, owner, name string, userID int) (*gitlab.ProjectMember, error) {
+func (g *GitLab) getInheritedProjectMember(ctx context.Context, client *gitlab.Client, forgeRemoteID model.ForgeRemoteID, owner, name string, userID int64) (*gitlab.ProjectMember, error) {
 	if forgeRemoteID.IsValid() {
 		intID, err := strconv.Atoi(string(forgeRemoteID))
 		if err != nil {
@@ -276,7 +269,7 @@ func (g *GitLab) Repo(ctx context.Context, user *model.User, remoteID model.Forg
 		return nil, err
 	}
 
-	projectMember, err := g.getInheritedProjectMember(ctx, client, remoteID, owner, name, intUserID)
+	projectMember, err := g.getInheritedProjectMember(ctx, client, remoteID, owner, name, int64(intUserID))
 	if err != nil {
 		return nil, err
 	}
@@ -285,15 +278,19 @@ func (g *GitLab) Repo(ctx context.Context, user *model.User, remoteID model.Forg
 }
 
 // Repos fetches a list of repos from the forge.
-func (g *GitLab) Repos(ctx context.Context, user *model.User) ([]*model.Repo, error) {
+func (g *GitLab) Repos(ctx context.Context, user *model.User, p *model.ListOptions) ([]*model.Repo, error) {
 	client, err := newClient(g.url, user.AccessToken, g.skipVerify)
 	if err != nil {
 		return nil, err
 	}
 
-	repos := make([]*model.Repo, 0, perPage)
+	perPage := min(p.PerPage, defaultPerPage)
+
 	opts := &gitlab.ListProjectsOptions{
-		ListOptions:    gitlab.ListOptions{PerPage: perPage},
+		ListOptions: gitlab.ListOptions{
+			Page:    int64(p.Page),
+			PerPage: int64(perPage),
+		},
 		MinAccessLevel: gitlab.Ptr(gitlab.DeveloperPermissions), // TODO: check what's best here
 	}
 	if g.hideArchives {
@@ -304,30 +301,25 @@ func (g *GitLab) Repos(ctx context.Context, user *model.User) ([]*model.Repo, er
 		return nil, err
 	}
 
-	for i := 1; true; i++ {
-		opts.Page = i
-		batch, _, err := client.Projects.ListProjects(opts, gitlab.WithContext(ctx))
+	projects, _, err := client.Projects.ListProjects(opts, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	repos := make([]*model.Repo, 0, len(projects))
+
+	for i := range projects {
+		projectMember, _, err := client.ProjectMembers.GetInheritedProjectMember(projects[i].ID, int64(intUserID), gitlab.WithContext(ctx))
 		if err != nil {
 			return nil, err
 		}
 
-		for i := range batch {
-			projectMember, _, err := client.ProjectMembers.GetInheritedProjectMember(batch[i].ID, intUserID, gitlab.WithContext(ctx))
-			if err != nil {
-				return nil, err
-			}
-
-			repo, err := g.convertGitLabRepo(batch[i], projectMember)
-			if err != nil {
-				return nil, err
-			}
-
-			repos = append(repos, repo)
+		repo, err := g.convertGitLabRepo(projects[i], projectMember)
+		if err != nil {
+			return nil, err
 		}
 
-		if len(batch) < perPage {
-			break
-		}
+		repos = append(repos, repo)
 	}
 
 	return repos, err
@@ -347,7 +339,7 @@ func (g *GitLab) PullRequests(ctx context.Context, u *model.User, r *model.Repo,
 
 	state := "opened"
 	pullRequests, _, err := client.MergeRequests.ListProjectMergeRequests(_repo.ID, &gitlab.ListProjectMergeRequestsOptions{
-		ListOptions: gitlab.ListOptions{Page: p.Page, PerPage: p.PerPage},
+		ListOptions: gitlab.ListOptions{Page: int64(p.Page), PerPage: int64(p.PerPage)},
 		State:       &state,
 	})
 	if err != nil {
@@ -357,7 +349,7 @@ func (g *GitLab) PullRequests(ctx context.Context, u *model.User, r *model.Repo,
 	result := make([]*model.PullRequest, len(pullRequests))
 	for i := range pullRequests {
 		result[i] = &model.PullRequest{
-			Index: model.ForgeRemoteID(strconv.Itoa(pullRequests[i].ID)),
+			Index: model.ForgeRemoteID(strconv.Itoa(int(pullRequests[i].ID))),
 			Title: pullRequests[i].Title,
 		}
 	}
@@ -388,14 +380,14 @@ func (g *GitLab) Dir(ctx context.Context, user *model.User, repo *model.Repo, pi
 		return nil, err
 	}
 
-	files := make([]*forge_types.FileMeta, 0, perPage)
+	files := make([]*forge_types.FileMeta, 0, defaultPerPage)
 	_repo, err := g.getProject(ctx, client, repo.ForgeRemoteID, repo.Owner, repo.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	opts := &gitlab.ListTreeOptions{
-		ListOptions: gitlab.ListOptions{PerPage: perPage},
+		ListOptions: gitlab.ListOptions{PerPage: defaultPerPage},
 		Path:        &path,
 		Ref:         &pipeline.Commit,
 		Recursive:   gitlab.Ptr(false),
@@ -425,7 +417,7 @@ func (g *GitLab) Dir(ctx context.Context, user *model.User, repo *model.Repo, pi
 			})
 		}
 
-		if len(batch) < perPage {
+		if len(batch) < defaultPerPage {
 			break
 		}
 	}
@@ -544,8 +536,10 @@ func (g *GitLab) Deactivate(ctx context.Context, user *model.User, repo *model.R
 	}
 
 	listProjectHooksOptions := &gitlab.ListProjectHooksOptions{
-		PerPage: perPage,
-		Page:    1,
+		ListOptions: gitlab.ListOptions{
+			PerPage: defaultPerPage,
+			Page:    1,
+		},
 	}
 	for {
 		hooks, resp, err := client.Projects.ListProjectHooks(_repo.ID, listProjectHooksOptions, gitlab.WithContext(ctx))
@@ -588,7 +582,7 @@ func (g *GitLab) Branches(ctx context.Context, user *model.User, repo *model.Rep
 	}
 
 	gitlabBranches, _, err := client.Branches.ListBranches(_repo.ID,
-		&gitlab.ListBranchesOptions{ListOptions: gitlab.ListOptions{Page: p.Page, PerPage: p.PerPage}},
+		&gitlab.ListBranchesOptions{ListOptions: gitlab.ListOptions{Page: int64(p.Page), PerPage: int64(p.PerPage)}},
 		gitlab.WithContext(ctx))
 	if err != nil {
 		return nil, err
@@ -642,20 +636,12 @@ func (g *GitLab) Hook(ctx context.Context, req *http.Request) (*model.Repo, *mod
 
 	switch event := parsed.(type) {
 	case *gitlab.MergeEvent:
-		// https://docs.gitlab.com/ee/user/project/integrations/webhook_events.html#merge-request-events
-		if event.ObjectAttributes.OldRev == "" &&
-			event.ObjectAttributes.Action != "open" &&
-			event.ObjectAttributes.Action != "close" &&
-			event.ObjectAttributes.Action != "merge" &&
-			event.ObjectAttributes.Action != "reopen" {
-			return nil, nil, &forge_types.ErrIgnoreEvent{Event: string(eventType), Reason: "no code changes"}
-		}
-		mergeIID, repo, pipeline, err := convertMergeRequestHook(event, req)
+		mergeID, milestoneID, repo, pipeline, err := convertMergeRequestHook(event, req)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		if pipeline, err = g.loadChangedFilesFromMergeRequest(ctx, repo, pipeline, mergeIID); err != nil {
+		if pipeline, err = g.loadMetadataFromMergeRequest(ctx, repo, pipeline, mergeID, milestoneID); err != nil {
 			return nil, nil, err
 		}
 
@@ -666,7 +652,14 @@ func (g *GitLab) Hook(ctx context.Context, req *http.Request) (*model.Repo, *mod
 		}
 		return convertPushHook(event)
 	case *gitlab.TagEvent:
-		return convertTagHook(event)
+		repo, pipeline, cmID, err := convertTagHook(event)
+		if err != nil || pipeline.Message != "" {
+			return repo, pipeline, err
+		}
+
+		// we have to fetch the commit message
+		pipeline, err = g.loadCommitFromSHA(ctx, repo, pipeline, cmID)
+		return repo, pipeline, err
 	case *gitlab.ReleaseEvent:
 		return convertReleaseHook(event)
 	default:
@@ -685,14 +678,14 @@ func (g *GitLab) OrgMembership(ctx context.Context, u *model.User, owner string)
 	groups, _, err := client.Groups.ListGroups(&gitlab.ListGroupsOptions{
 		ListOptions: gitlab.ListOptions{
 			Page:    1,
-			PerPage: perPage,
+			PerPage: defaultPerPage,
 		},
 		Search: gitlab.Ptr(owner),
 	}, gitlab.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
-	var gid int
+	var gid int64
 	for _, group := range groups {
 		if group.Name == owner {
 			gid = group.ID
@@ -706,12 +699,12 @@ func (g *GitLab) OrgMembership(ctx context.Context, u *model.User, owner string)
 	opts := &gitlab.ListGroupMembersOptions{
 		ListOptions: gitlab.ListOptions{
 			Page:    1,
-			PerPage: perPage,
+			PerPage: defaultPerPage,
 		},
 	}
 
 	for i := 1; true; i++ {
-		opts.Page = i
+		opts.Page = int64(i)
 		members, _, err := client.Groups.ListAllGroupMembers(gid, opts, gitlab.WithContext(ctx))
 		if err != nil {
 			return nil, err
@@ -722,7 +715,7 @@ func (g *GitLab) OrgMembership(ctx context.Context, u *model.User, owner string)
 			}
 		}
 
-		if len(members) < opts.PerPage {
+		if len(members) < int(opts.PerPage) {
 			break
 		}
 	}
@@ -754,7 +747,7 @@ func (g *GitLab) Org(ctx context.Context, u *model.User, owner string) (*model.O
 	groups, _, err := client.Groups.ListGroups(&gitlab.ListGroupsOptions{
 		ListOptions: gitlab.ListOptions{
 			Page:    1,
-			PerPage: perPage,
+			PerPage: defaultPerPage,
 		},
 		Search: gitlab.Ptr(owner),
 	}, gitlab.WithContext(ctx))
@@ -780,14 +773,14 @@ func (g *GitLab) Org(ctx context.Context, u *model.User, owner string) (*model.O
 	}, nil
 }
 
-func (g *GitLab) loadChangedFilesFromMergeRequest(ctx context.Context, tmpRepo *model.Repo, pipeline *model.Pipeline, mergeIID int) (*model.Pipeline, error) {
+func (g *GitLab) loadMetadataFromMergeRequest(ctx context.Context, tmpRepo *model.Repo, pipeline *model.Pipeline, mergeID, milestoneID int64) (*model.Pipeline, error) {
 	_store, ok := store.TryFromContext(ctx)
 	if !ok {
 		log.Error().Msg("could not get store from context")
 		return pipeline, nil
 	}
 
-	repo, err := _store.GetRepoNameFallback(tmpRepo.ForgeRemoteID, tmpRepo.FullName)
+	repo, err := _store.GetRepoNameFallback(g.id, tmpRepo.ForgeRemoteID, tmpRepo.FullName)
 	if err != nil {
 		return nil, err
 	}
@@ -796,6 +789,8 @@ func (g *GitLab) loadChangedFilesFromMergeRequest(ctx context.Context, tmpRepo *
 	if err != nil {
 		return nil, err
 	}
+
+	forge.Refresh(ctx, g, _store, user)
 
 	client, err := newClient(g.url, user.AccessToken, g.skipVerify)
 	if err != nil {
@@ -807,7 +802,7 @@ func (g *GitLab) loadChangedFilesFromMergeRequest(ctx context.Context, tmpRepo *
 		return nil, err
 	}
 
-	changes, _, err := client.MergeRequests.ListMergeRequestDiffs(_repo.ID, mergeIID, &gitlab.ListMergeRequestDiffsOptions{}, gitlab.WithContext(ctx))
+	changes, _, err := client.MergeRequests.ListMergeRequestDiffs(_repo.ID, mergeID, &gitlab.ListMergeRequestDiffsOptions{}, gitlab.WithContext(ctx))
 	if err != nil {
 		return nil, err
 	}
@@ -817,6 +812,59 @@ func (g *GitLab) loadChangedFilesFromMergeRequest(ctx context.Context, tmpRepo *
 		files = append(files, file.NewPath, file.OldPath)
 	}
 	pipeline.ChangedFiles = utils.DeduplicateStrings(files)
+
+	if milestoneID != 0 {
+		milestone, _, err := client.Milestones.GetMilestone(_repo.ID, milestoneID)
+		if err != nil {
+			return nil, err
+		}
+		pipeline.PullRequestMilestone = milestone.Title
+	}
+
+	return pipeline, nil
+}
+
+func (g *GitLab) loadCommitFromSHA(ctx context.Context, tmpRepo *model.Repo, pipeline *model.Pipeline, sha string) (*model.Pipeline, error) {
+	_store, ok := store.TryFromContext(ctx)
+	if !ok {
+		log.Error().Msg("could not get store from context")
+		return pipeline, nil
+	}
+
+	repo, err := _store.GetRepoNameFallback(g.id, tmpRepo.ForgeRemoteID, tmpRepo.FullName)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := _store.GetUser(repo.UserID)
+	if err != nil {
+		return nil, err
+	}
+
+	forge.Refresh(ctx, g, _store, user)
+
+	client, err := newClient(g.url, user.AccessToken, g.skipVerify)
+	if err != nil {
+		return nil, err
+	}
+
+	_repo, err := g.getProject(ctx, client, repo.ForgeRemoteID, repo.Owner, repo.Name)
+	if err != nil {
+		return nil, err
+	}
+
+	cm, _, err := client.Commits.GetCommit(_repo.ID, sha, &gitlab.GetCommitOptions{}, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+
+	pipeline.Author = cm.AuthorName
+	pipeline.Email = cm.AuthorEmail
+	pipeline.Message = cm.Message
+	pipeline.Timestamp = cm.CommittedDate.Unix()
+	if len(pipeline.Email) != 0 {
+		pipeline.Avatar = getUserAvatar(pipeline.Email)
+	}
 
 	return pipeline, nil
 }

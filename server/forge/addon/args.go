@@ -18,11 +18,6 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 )
 
-type argumentsAuth struct {
-	Token  string `json:"token"`
-	Secret string `json:"secret"`
-}
-
 type argumentsRepo struct {
 	U        *modelUser          `json:"u"`
 	RemoteID model.ForgeRemoteID `json:"remote_id"`
@@ -70,6 +65,16 @@ type argumentsBranchHead struct {
 type argumentsOrgMembershipOrg struct {
 	U   *modelUser `json:"u"`
 	Org string     `json:"org"`
+}
+
+type argumentsTeams struct {
+	U *modelUser         `json:"u"`
+	P *model.ListOptions `json:"p"`
+}
+
+type argumentsRepos struct {
+	U *modelUser         `json:"u"`
+	P *model.ListOptions `json:"p"`
 }
 
 type responseHook struct {

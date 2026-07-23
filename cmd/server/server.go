@@ -19,22 +19,26 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/cenkalti/backoff/v5"
+	"github.com/cenkalti/backoff/v6"
 	"github.com/gin-gonic/gin"
-	prometheus_http "github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
 
 	"go.woodpecker-ci.org/woodpecker/v3/server"
-	"go.woodpecker-ci.org/woodpecker/v3/server/cron"
+	cron_scheduler "go.woodpecker-ci.org/woodpecker/v3/server/cron"
+	"go.woodpecker-ci.org/woodpecker/v3/server/metric"
 	"go.woodpecker-ci.org/woodpecker/v3/server/router"
 	"go.woodpecker-ci.org/woodpecker/v3/server/router/middleware"
 	"go.woodpecker-ci.org/woodpecker/v3/server/store"
@@ -122,11 +126,11 @@ func run(ctx context.Context, c *cli.Command) error {
 
 	log.Info().Msgf("starting Woodpecker server with version '%s'", version.String())
 
-	startMetricsCollector(ctx, _store)
+	metric.StartMetricsCollector(ctx, c, _store)
 
 	serviceWaitingGroup.Go(func() error {
 		log.Info().Msg("starting cron service ...")
-		if err := cron.Run(ctx, _store); err != nil {
+		if err := cron_scheduler.Run(ctx, _store); err != nil {
 			go stopServerFunc(err)
 			return err
 		}
@@ -246,8 +250,25 @@ func run(ctx context.Context, c *cli.Command) error {
 	} else {
 		// start the server without tls
 		serviceWaitingGroup.Go(func() error {
+			network := "tcp"
+			addr := c.String("server-addr")
+			if strings.HasPrefix(addr, "unix://") {
+				network = "unix"
+				addr, _ = filepath.Abs(strings.TrimPrefix(addr, "unix://"))
+				if _, err := os.Stat(filepath.Dir(addr)); os.IsNotExist(err) {
+					err = fmt.Errorf("can not listen to unix socket, parent folder %q not exist", filepath.Dir(addr))
+					stopServerFunc(err)
+					return err
+				}
+			}
+			lis, err := net.Listen(network, addr)
+			if err != nil {
+				err = fmt.Errorf("could not start web listener: %w", err)
+				stopServerFunc(err)
+				return err
+			}
+
 			httpServer := &http.Server{
-				Addr:    c.String("server-addr"),
 				Handler: handler,
 			}
 
@@ -262,7 +283,7 @@ func run(ctx context.Context, c *cli.Command) error {
 			}()
 
 			log.Info().Msg("starting http server ...")
-			if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := httpServer.Serve(lis); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error().Err(err).Msg("http server failed")
 				stopServerFunc(fmt.Errorf("http server failed: %w", err))
 			}
@@ -273,7 +294,7 @@ func run(ctx context.Context, c *cli.Command) error {
 	if metricsServerAddr := c.String("metrics-server-addr"); metricsServerAddr != "" {
 		serviceWaitingGroup.Go(func() error {
 			metricsRouter := gin.New()
-			metricsRouter.GET("/metrics", gin.WrapH(prometheus_http.Handler()))
+			metricsRouter.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 			metricsServer := &http.Server{
 				Addr:    metricsServerAddr,

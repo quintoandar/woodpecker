@@ -17,19 +17,17 @@ package core
 import (
 	"context"
 	"os"
+	"slices"
 
-	// Load config from .env file.
-	_ "github.com/joho/godotenv/autoload"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 
-	backend "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
+	backend_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/logger"
-	"go.woodpecker-ci.org/woodpecker/v3/shared/utils"
 	"go.woodpecker-ci.org/woodpecker/v3/version"
 )
 
-func RunAgent(ctx context.Context, backends []backend.Backend) {
+func GenApp(backends []backend_types.Backend) *cli.Command {
 	app := &cli.Command{}
 	app.Name = "woodpecker-agent"
 	app.Version = version.String()
@@ -42,11 +40,16 @@ func RunAgent(ctx context.Context, backends []backend.Backend) {
 			Action: pinger,
 		},
 	}
-	agentFlags := utils.MergeSlices(flags, logger.GlobalLoggerFlags)
+	agentFlags := slices.Concat(flags, logger.GlobalLoggerFlags)
 	for _, b := range backends {
-		agentFlags = utils.MergeSlices(agentFlags, b.Flags())
+		agentFlags = slices.Concat(agentFlags, b.Flags())
 	}
 	app.Flags = agentFlags
+	return app
+}
+
+func RunAgent(ctx context.Context, backends []backend_types.Backend) {
+	app := GenApp(backends)
 
 	if err := app.Run(ctx, os.Args); err != nil {
 		log.Fatal().Err(err).Msg("error running agent") //nolint:forbidigo

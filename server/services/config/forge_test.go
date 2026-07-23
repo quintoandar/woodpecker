@@ -27,6 +27,7 @@ import (
 	forge_types "go.woodpecker-ci.org/woodpecker/v3/server/forge/types"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 	"go.woodpecker-ci.org/woodpecker/v3/server/services/config"
+	"go.woodpecker-ci.org/woodpecker/v3/shared/constant"
 )
 
 func TestFetch(t *testing.T) {
@@ -283,7 +284,7 @@ func TestFetch(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := &model.Repo{Owner: "laszlocph", Name: "multipipeline", Config: tt.repoConfig}
 
-			f := new(mocks.Forge)
+			f := new(mocks.MockForge)
 			dirs := map[string][]*forge_types.FileMeta{}
 			for _, file := range tt.files {
 				f.On("File", mock.Anything, mock.Anything, mock.Anything, mock.Anything, file.name).Once().Return(file.data, nil)
@@ -307,6 +308,8 @@ func TestFetch(t *testing.T) {
 			configFetcher := config.NewForge(
 				time.Second*3,
 				3,
+				constant.DefaultConfigOrder,
+				[]string{".yaml", ".yml"},
 			)
 			files, err := configFetcher.Fetch(
 				t.Context(),

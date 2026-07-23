@@ -18,16 +18,18 @@ import (
 	"encoding/base32"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/securecookie"
 	"github.com/rs/zerolog/log"
+	"github.com/tink-crypto/tink-go/v2/subtle/random"
 
 	"go.woodpecker-ci.org/woodpecker/v3/server"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 	"go.woodpecker-ci.org/woodpecker/v3/server/router/middleware/session"
 	"go.woodpecker-ci.org/woodpecker/v3/server/store"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/token"
+	"go.woodpecker-ci.org/woodpecker/v3/shared/utils"
 )
 
 // GetSelf
@@ -85,6 +87,7 @@ func GetFeed(c *gin.Context) {
 //	@Tags			User
 //	@Param			Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
 //	@Param			all				query	bool	false	"query all repos, including inactive ones"
+//	@Param			name			query	string	false	"filter repos by name"
 func GetRepos(c *gin.Context) {
 	_store := store.FromContext(c)
 	user := session.User(c)
@@ -96,20 +99,32 @@ func GetRepos(c *gin.Context) {
 	}
 
 	all, _ := strconv.ParseBool(c.Query("all"))
+	filter := &model.RepoFilter{
+		Name: c.Query("name"),
+	}
 
 	if all {
-		dbRepos, err := _store.RepoList(user, true, false)
+		dbRepos, err := _store.RepoList(user, true, false, filter)
 		if err != nil {
 			c.String(http.StatusInternalServerError, "Error fetching repository list. %s", err)
 			return
 		}
 
-		active := map[model.ForgeRemoteID]*model.Repo{}
+		dbReposMap := map[model.ForgeRemoteID]*model.Repo{}
+		dbStaleReposMap := map[int64]*model.Repo{}
+		dbReposFullNameMap := map[string]*model.Repo{}
 		for _, r := range dbRepos {
-			active[r.ForgeRemoteID] = r
+			dbReposMap[r.ForgeRemoteID] = r
+			dbReposFullNameMap[strings.ToLower(r.FullName)] = r
+			dbStaleReposMap[r.ID] = r
 		}
 
-		_repos, err := _forge.Repos(c, user)
+		_repos, err := utils.Paginate(func(page int) ([]*model.Repo, error) {
+			return _forge.Repos(c, user, &model.ListOptions{
+				Page:    page,
+				PerPage: perPage,
+			})
+		}, maxPage)
 		if err != nil {
 			c.String(http.StatusInternalServerError, "Error fetching repository list. %s", err)
 			return
@@ -117,24 +132,49 @@ func GetRepos(c *gin.Context) {
 
 		var repos []*model.Repo
 		for _, r := range _repos {
+			// make sure forgeID is set
+			r.ForgeID = user.ForgeID
+
 			if r.Perm.Push && server.Config.Permissions.OwnersAllowlist.IsAllowed(r) {
-				if active[r.ForgeRemoteID] != nil {
-					existingRepo := active[r.ForgeRemoteID]
+				if existingRepo := dbReposMap[r.ForgeRemoteID]; existingRepo != nil {
+					// update repo with forge response
 					existingRepo.Update(r)
-					existingRepo.IsActive = active[r.ForgeRemoteID].IsActive
+					// re-apply active info
+					existingRepo.IsActive = dbReposMap[r.ForgeRemoteID].IsActive
+					// add to final return list
 					repos = append(repos, existingRepo)
+					// not stale, so remove it
+					delete(dbStaleReposMap, existingRepo.ID)
 				} else if r.Perm.Admin {
-					// you must be admin to enable the repo
+					// you must be admin of the remote repo to enable the repo
 					repos = append(repos, r)
 				}
 			}
+		}
+
+		// detect conflicts
+		for _, r := range repos {
+			// calc if we have a remote repo with different remote id but same name as a stored one
+			if existingRepo := dbReposFullNameMap[strings.ToLower(r.FullName)]; existingRepo != nil && existingRepo.ForgeRemoteID != r.ForgeRemoteID {
+				r.ID = existingRepo.ID
+				r.HasForgeNameConflict = true
+
+				// not stale, so remove it
+				delete(dbStaleReposMap, existingRepo.ID)
+			}
+		}
+
+		// return stale repos
+		for _, staleRepo := range dbStaleReposMap {
+			staleRepo.HasNoForgeRepo = true
+			repos = append(repos, staleRepo)
 		}
 
 		c.JSON(http.StatusOK, repos)
 		return
 	}
 
-	activeRepos, err := _store.RepoList(user, true, true)
+	activeRepos, err := _store.RepoList(user, true, true, filter)
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Error fetching repository list. %s", err)
 		return
@@ -158,13 +198,38 @@ func GetRepos(c *gin.Context) {
 
 	repos := make([]*model.RepoLastPipeline, len(activeRepos))
 	for i, repo := range activeRepos {
+		var lastAPIPipeline *model.APIPipeline
+		lastPipeline, ok := latestPipelines[repo.ID]
+		if ok {
+			lastAPIPipeline = lastPipeline.ToAPIModel()
+		}
+
 		repos[i] = &model.RepoLastPipeline{
 			Repo:         repo,
-			LastPipeline: latestPipelines[repo.ID],
+			LastPipeline: lastAPIPipeline,
 		}
 	}
 
 	c.JSON(http.StatusOK, repos)
+}
+
+func RefreshRepos(c *gin.Context) {
+	_store := store.FromContext(c)
+	user := session.User(c)
+
+	_forge, err := server.Config.Services.Manager.ForgeFromUser(user)
+	if err != nil {
+		log.Error().Err(err).Msg("Cannot get forge from user")
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	if err := updateRepoPermissions(c, user, _store, _forge, user.ForgeID); err != nil {
+		log.Error().Err(err).Msgf("Can't update repo permissions for user %s in forge %s", user.Login, _forge.Name())
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	c.JSON(http.StatusOK, "Ok")
 }
 
 // PostToken
@@ -201,7 +266,7 @@ func DeleteToken(c *gin.Context) {
 
 	user := session.User(c)
 	user.Hash = base32.StdEncoding.EncodeToString(
-		securecookie.GenerateRandomKey(32),
+		random.GetRandomBytes(32),
 	)
 	if err := _store.UpdateUser(user); err != nil {
 		c.String(http.StatusInternalServerError, "Error revoking tokens. %s", err)

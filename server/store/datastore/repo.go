@@ -31,26 +31,26 @@ func (s storage) GetRepo(id int64) (*model.Repo, error) {
 	return repo, wrapGet(s.engine.ID(id).Get(repo))
 }
 
-func (s storage) GetRepoForgeID(remoteID model.ForgeRemoteID) (*model.Repo, error) {
+func (s storage) GetRepoForgeID(forgeID int64, remoteID model.ForgeRemoteID) (*model.Repo, error) {
 	sess := s.engine.NewSession()
 	defer sess.Close()
-	return s.getRepoForgeID(sess, remoteID)
+	return s.getRepoForgeID(sess, forgeID, remoteID)
 }
 
-func (s storage) getRepoForgeID(e *xorm.Session, remoteID model.ForgeRemoteID) (*model.Repo, error) {
+func (s storage) getRepoForgeID(e *xorm.Session, forgeID int64, remoteID model.ForgeRemoteID) (*model.Repo, error) {
 	repo := new(model.Repo)
-	return repo, wrapGet(e.Where("forge_remote_id = ?", remoteID).Get(repo))
+	return repo, wrapGet(e.Where("forge_id = ? AND forge_remote_id = ?", forgeID, remoteID).Get(repo))
 }
 
-func (s storage) GetRepoNameFallback(remoteID model.ForgeRemoteID, fullName string) (*model.Repo, error) {
+func (s storage) GetRepoNameFallback(forgeID int64, remoteID model.ForgeRemoteID, fullName string) (*model.Repo, error) {
 	sess := s.engine.NewSession()
 	defer sess.Close()
-	return s.getRepoNameFallback(sess, remoteID, fullName)
+	return s.getRepoNameFallback(sess, forgeID, remoteID, fullName)
 }
 
-func (s storage) getRepoNameFallback(e *xorm.Session, remoteID model.ForgeRemoteID, fullName string) (*model.Repo, error) {
-	repo, err := s.getRepoForgeID(e, remoteID)
-	if errors.Is(err, types.RecordNotExist) {
+func (s storage) getRepoNameFallback(e *xorm.Session, forgeID int64, remoteID model.ForgeRemoteID, fullName string) (*model.Repo, error) {
+	repo, err := s.getRepoForgeID(e, forgeID, remoteID)
+	if errors.Is(err, types.ErrRecordNotExist) {
 		return s.getRepoName(e, fullName)
 	}
 	return repo, err
@@ -60,7 +60,7 @@ func (s storage) GetRepoName(fullName string) (*model.Repo, error) {
 	sess := s.engine.NewSession()
 	defer sess.Close()
 	repo, err := s.getRepoName(sess, fullName)
-	if errors.Is(err, types.RecordNotExist) {
+	if errors.Is(err, types.ErrRecordNotExist) {
 		// the repository does not exist, so look for a redirection
 		redirect, err := s.getRedirection(sess, fullName)
 		if err != nil {
@@ -90,8 +90,7 @@ func (s storage) CreateRepo(repo *model.Repo) error {
 		return fmt.Errorf("repo full name is empty")
 	}
 	// only Insert set auto created ID back to object
-	_, err := s.engine.Insert(repo)
-	return err
+	return wrapInsert(s.engine.Insert(repo))
 }
 
 func (s storage) UpdateRepo(repo *model.Repo) error {
@@ -143,7 +142,7 @@ func (s storage) deleteRepo(sess *xorm.Session, repo *model.Repo) error {
 
 // RepoList list all repos where permissions for specific user are stored
 // TODO: paginate
-func (s storage) RepoList(user *model.User, owned, active bool) ([]*model.Repo, error) {
+func (s storage) RepoList(user *model.User, owned, active bool, f *model.RepoFilter) ([]*model.Repo, error) {
 	repos := make([]*model.Repo, 0)
 	sess := s.engine.Table("repos").
 		Join("INNER", "perms", "perms.repo_id = repos.id").
@@ -153,6 +152,9 @@ func (s storage) RepoList(user *model.User, owned, active bool) ([]*model.Repo, 
 	}
 	if active {
 		sess = sess.And(builder.Eq{"repos.active": true})
+	}
+	if f != nil && f.Name != "" {
+		sess = sess.And(builder.Eq{"repos.name": f.Name})
 	}
 	return repos, sess.
 		Asc("full_name").

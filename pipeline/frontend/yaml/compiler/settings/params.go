@@ -20,8 +20,8 @@ import (
 	"strconv"
 	"strings"
 
-	"codeberg.org/6543/go-yaml2json"
-	"gopkg.in/yaml.v3"
+	"codeberg.org/6543/go-yaml2json/v2"
+	"go.yaml.in/yaml/v4"
 )
 
 // ParamsToEnv uses reflection to convert a map[string]interface to a list
@@ -97,7 +97,7 @@ func sanitizeParamValue(v any, getSecretValue func(name string) (string, error))
 
 	case reflect.Map:
 		switch v := v.(type) {
-		// gopkg.in/yaml.v3 only emits this map interface
+		// go.yaml.in/yaml/v4 only emits this map interface
 		case map[string]any:
 			// check if it's a secret and return value if it's the case
 			value, isSecret, err := injectSecret(v, getSecretValue)
@@ -194,7 +194,9 @@ func injectSecret(v map[string]any, getSecretValue func(name string) (string, er
 // it iterates recursively over them too, using injectSecret internally.
 func injectSecretRecursive(v any, getSecretValue func(name string) (string, error)) (any, error) {
 	t := reflect.TypeOf(v)
-
+	if t == nil {
+		return v, nil
+	}
 	if !isComplex(t.Kind()) {
 		return v, nil
 	}
@@ -202,7 +204,7 @@ func injectSecretRecursive(v any, getSecretValue func(name string) (string, erro
 	switch t.Kind() {
 	case reflect.Map:
 		switch v := v.(type) {
-		// gopkg.in/yaml.v3 only emits this map interface
+		// go.yaml.in/yaml/v4 only emits this map interface
 		case map[string]any:
 			// handle secrets
 			value, isSecret, err := injectSecret(v, getSecretValue)

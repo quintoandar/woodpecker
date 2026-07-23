@@ -14,6 +14,11 @@
 
 package model
 
+import (
+	"fmt"
+	"strings"
+)
+
 type ListOptions struct {
 	All     bool
 	Page    int
@@ -27,8 +32,26 @@ func ApplyPagination[T any](d *ListOptions, slice []T) []T {
 	if d.PerPage*(d.Page-1) > len(slice) {
 		return []T{}
 	}
-	if d.PerPage*(d.Page) > len(slice) {
+	if d.PerPage*d.Page > len(slice) {
 		return slice[d.PerPage*(d.Page-1):]
 	}
-	return slice[d.PerPage*(d.Page-1) : d.PerPage*(d.Page)]
+	return slice[d.PerPage*(d.Page-1) : d.PerPage*d.Page]
+}
+
+func (d *ListOptions) Encode() string {
+	var query []string
+
+	if d.Page != 0 {
+		query = append(query, fmt.Sprintf("page=%d", d.Page))
+	}
+
+	if d.PerPage != 0 {
+		query = append(query, fmt.Sprintf("per_page=%d", d.PerPage))
+	}
+
+	if d.All {
+		query = append(query, "all=true")
+	}
+
+	return strings.Join(query, "&")
 }

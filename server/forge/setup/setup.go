@@ -1,3 +1,17 @@
+// Copyright 2024 Woodpecker Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package setup
 
 import (
@@ -50,7 +64,7 @@ func setupBitbucket(forge *model.Forge) (forge.Forge, error) {
 		Bool("oauth-client-secret-set", opts.OAuthClientSecret != "").
 		Str("type", string(forge.Type)).
 		Msg("setting up forge")
-	return bitbucket.New(opts)
+	return bitbucket.New(forge.ID, opts)
 }
 
 func setupGitea(forge *model.Forge) (forge.Forge, error) {
@@ -77,7 +91,7 @@ func setupGitea(forge *model.Forge) (forge.Forge, error) {
 		Bool("oauth-secret-id-set", opts.OAuthClientSecret != "").
 		Str("type", string(forge.Type)).
 		Msg("setting up forge")
-	return gitea.New(opts)
+	return gitea.New(forge.ID, opts)
 }
 
 func setupForgejo(forge *model.Forge) (forge.Forge, error) {
@@ -104,7 +118,7 @@ func setupForgejo(forge *model.Forge) (forge.Forge, error) {
 		Bool("oauth-client-secret-set", opts.OAuthClientSecret != "").
 		Str("type", string(forge.Type)).
 		Msg("setting up forge")
-	return forgejo.New(opts)
+	return forgejo.New(forge.ID, opts)
 }
 
 func setupGitLab(forge *model.Forge) (forge.Forge, error) {
@@ -123,19 +137,13 @@ func setupGitLab(forge *model.Forge) (forge.Forge, error) {
 		Bool("oauth-client-secret-set", opts.OAuthClientSecret != "").
 		Str("type", string(forge.Type)).
 		Msg("setting up forge")
-	return gitlab.New(opts)
+	return gitlab.New(forge.ID, opts)
 }
 
 func setupGitHub(forge *model.Forge) (forge.Forge, error) {
-	mergeRef, ok := forge.AdditionalOptions["merge-ref"].(bool)
-	if !ok {
-		return nil, fmt.Errorf("missing merge-ref")
-	}
-
-	publicOnly, ok := forge.AdditionalOptions["public-only"].(bool)
-	if !ok {
-		return nil, fmt.Errorf("missing public-only")
-	}
+	// get additional config and be false by default
+	mergeRef, _ := forge.AdditionalOptions["merge-ref"].(bool)
+	publicOnly, _ := forge.AdditionalOptions["public-only"].(bool)
 
 	opts := github.Opts{
 		URL:               forge.URL,
@@ -156,7 +164,7 @@ func setupGitHub(forge *model.Forge) (forge.Forge, error) {
 		Bool("oauth-client-secret-set", opts.OAuthClientSecret != "").
 		Str("type", string(forge.Type)).
 		Msg("setting up forge")
-	return github.New(opts)
+	return github.New(forge.ID, opts)
 }
 
 func setupBitbucketDatacenter(forge *model.Forge) (forge.Forge, error) {
@@ -169,13 +177,19 @@ func setupBitbucketDatacenter(forge *model.Forge) (forge.Forge, error) {
 		return nil, fmt.Errorf("missing git-password")
 	}
 
+	enableProjectAdminScope, ok := forge.AdditionalOptions["oauth-enable-project-admin-scope"].(bool)
+	if !ok {
+		return nil, fmt.Errorf("incorrect type for oauth-enable-project-admin-scope value")
+	}
+
 	opts := bitbucketdatacenter.Opts{
-		URL:               forge.URL,
-		OAuthClientID:     forge.OAuthClientID,
-		OAuthClientSecret: forge.OAuthClientSecret,
-		Username:          gitUsername,
-		Password:          gitPassword,
-		OAuthHost:         forge.OAuthHost,
+		URL:                          forge.URL,
+		OAuthClientID:                forge.OAuthClientID,
+		OAuthClientSecret:            forge.OAuthClientSecret,
+		Username:                     gitUsername,
+		Password:                     gitPassword,
+		OAuthHost:                    forge.OAuthHost,
+		OAuthEnableProjectAdminScope: enableProjectAdminScope,
 	}
 	log.Debug().
 		Str("url", opts.URL).
@@ -183,8 +197,9 @@ func setupBitbucketDatacenter(forge *model.Forge) (forge.Forge, error) {
 		Bool("oauth-client-id-set", opts.OAuthClientID != "").
 		Bool("oauth-client-secret-set", opts.OAuthClientSecret != "").
 		Str("type", string(forge.Type)).
+		Bool("oauth-enable-project-admin-scope", opts.OAuthEnableProjectAdminScope).
 		Msg("setting up forge")
-	return bitbucketdatacenter.New(opts)
+	return bitbucketdatacenter.New(forge.ID, opts)
 }
 
 func setupAddon(forge *model.Forge) (forge.Forge, error) {

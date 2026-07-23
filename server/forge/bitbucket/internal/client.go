@@ -32,9 +32,8 @@ import (
 const (
 	pathUser          = "%s/2.0/user/"
 	pathEmails        = "%s/2.0/user/emails"
-	pathPermission    = "%s/2.0/user/permissions/repositories?q=repository.full_name=%q"
-	pathPermissions   = "%s/2.0/user/permissions/repositories?%s"
-	pathWorkspaces    = "%s/2.0/workspaces/?%s"
+	pathPermissions   = "%s/2.0/user/workspaces/%s/permissions/repositories?%s"
+	pathWorkspaces    = "%s/2.0/user/workspaces/?%s"
 	pathWorkspace     = "%s/2.0/workspaces/%s"
 	pathRepo          = "%s/2.0/repositories/%s/%s"
 	pathRepos         = "%s/2.0/repositories/%s?%s"
@@ -47,6 +46,7 @@ const (
 	pathPullRequests  = "%s/2.0/repositories/%s/%s/pullrequests?%s"
 	pathBranchCommits = "%s/2.0/repositories/%s/%s/commits/%s"
 	pathDir           = "%s/2.0/repositories/%s/%s/src/%s/%s"
+	pathDiffStat      = "%s/2.0/repositories/%s/%s/diffstat/%s?%s"
 	pageSize          = 100
 )
 
@@ -87,7 +87,7 @@ func (c *Client) ListEmail() (*EmailResp, error) {
 	return out, err
 }
 
-func (c *Client) ListWorkspaces(opts *ListWorkspacesOpts) (*WorkspacesResp, error) {
+func (c *Client) ListWorkspaces(opts *ListOpts) (*WorkspacesResp, error) {
 	out := new(WorkspacesResp)
 	uri := fmt.Sprintf(pathWorkspaces, c.base, opts.Encode())
 	_, err := c.do(uri, http.MethodGet, nil, out)
@@ -155,9 +155,9 @@ func (c *Client) CreateStatus(owner, name, revision string, status *PipelineStat
 	return err
 }
 
-func (c *Client) GetPermission(fullName string) (*RepoPerm, error) {
+func (c *Client) GetPermission(owner, fullName string) (*RepoPerm, error) {
 	out := new(RepoPermResp)
-	uri := fmt.Sprintf(pathPermission, c.base, fullName)
+	uri := fmt.Sprintf(pathPermissions, c.base, owner, fmt.Sprintf("q=%s", url.QueryEscape(fmt.Sprintf("repository.full_name=%q", fullName))))
 	_, err := c.do(uri, http.MethodGet, nil, out)
 	if err != nil {
 		return nil, err
@@ -169,16 +169,16 @@ func (c *Client) GetPermission(fullName string) (*RepoPerm, error) {
 	return out.Values[0], nil
 }
 
-func (c *Client) ListPermissions(opts *ListOpts) (*RepoPermResp, error) {
+func (c *Client) ListPermissions(workspace string, opts *ListOpts) (*RepoPermResp, error) {
 	out := new(RepoPermResp)
-	uri := fmt.Sprintf(pathPermissions, c.base, opts.Encode())
+	uri := fmt.Sprintf(pathPermissions, c.base, workspace, opts.Encode())
 	_, err := c.do(uri, http.MethodGet, nil, out)
 	return out, err
 }
 
-func (c *Client) ListPermissionsAll() ([]*RepoPerm, error) {
+func (c *Client) ListPermissionsAll(workspace string) ([]*RepoPerm, error) {
 	return shared_utils.Paginate(func(page int) ([]*RepoPerm, error) {
-		resp, err := c.ListPermissions(&ListOpts{Page: page, PageLen: pageSize})
+		resp, err := c.ListPermissions(workspace, &ListOpts{Page: page, PageLen: pageSize})
 		if err != nil {
 			return nil, err
 		}
@@ -233,6 +233,42 @@ func (c *Client) ListPullRequests(owner, name string, opts *ListOpts) ([]*PullRe
 	uri := fmt.Sprintf(pathPullRequests, c.base, owner, name, opts.Encode())
 	_, err := c.do(uri, http.MethodGet, nil, out)
 	return out.Values, err
+}
+
+func (c *Client) ListChangedFiles(owner, name, ref string) (result []string, err error) {
+	paths := make(map[string]struct{})
+	opts := &ListOpts{Page: 1, PageLen: pageSize}
+	for {
+		var resp DiffStatResp
+		uri := fmt.Sprintf(pathDiffStat, c.base, owner, name, ref, opts.Encode())
+		if _, err = c.do(uri, http.MethodGet, nil, &resp); err != nil {
+			return nil, err
+		}
+
+		for _, diff := range resp.Values {
+			if diff == nil {
+				continue
+			}
+
+			if diff.Old != nil {
+				paths[diff.Old.Path] = struct{}{}
+			}
+			if diff.New != nil {
+				paths[diff.New.Path] = struct{}{}
+			}
+		}
+
+		if resp.Next == nil {
+			break
+		}
+		opts.Page++
+	}
+
+	result = make([]string, 0, len(paths))
+	for path := range paths {
+		result = append(result, path)
+	}
+	return result, err
 }
 
 func (c *Client) GetWorkspace(name string) (*Workspace, error) {

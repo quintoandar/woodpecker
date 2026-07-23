@@ -36,17 +36,12 @@ type pushHook struct {
 	Sender *gitea.User `json:"sender"`
 }
 
-type pullRequest struct {
-	gitea.PullRequest
-	Draft bool `json:"draft"`
-}
-
 type pullRequestHook struct {
-	Action      string            `json:"action"`
-	Number      int64             `json:"number"`
-	PullRequest *pullRequest      `json:"pull_request"`
-	Repo        *gitea.Repository `json:"repository"`
-	Sender      *gitea.User       `json:"sender"`
+	Action      string             `json:"action"`
+	Number      int64              `json:"number"`
+	PullRequest *gitea.PullRequest `json:"pull_request"`
+	Repo        *gitea.Repository  `json:"repository"`
+	Sender      *gitea.User        `json:"sender"`
 }
 
 type releaseHook struct {

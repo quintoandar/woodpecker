@@ -665,7 +665,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/Forge"
+                            "$ref": "#/definitions/ForgeWithOAuthClientSecret"
                         }
                     }
                 ],
@@ -679,7 +679,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/forges/{forgeId}": {
+        "/forges/{forge_id}": {
             "get": {
                 "produces": [
                     "application/json"
@@ -699,7 +699,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the forge's id",
-                        "name": "forgeId",
+                        "name": "forge_id",
                         "in": "path",
                         "required": true
                     }
@@ -733,7 +733,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the forge's id",
-                        "name": "forgeId",
+                        "name": "forge_id",
                         "in": "path",
                         "required": true
                     }
@@ -764,7 +764,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the forge's id",
-                        "name": "forgeId",
+                        "name": "forge_id",
                         "in": "path",
                         "required": true
                     },
@@ -774,7 +774,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/Forge"
+                            "$ref": "#/definitions/ForgeWithOAuthClientSecret"
                         }
                     }
                 ],
@@ -990,40 +990,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/orgs/{id}": {
-            "delete": {
-                "description": "Deletes the given org. Requires admin rights.",
-                "produces": [
-                    "text/plain"
-                ],
-                "tags": [
-                    "Orgs"
-                ],
-                "summary": "Delete an organization",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "default": "Bearer \u003cpersonal access token\u003e",
-                        "description": "Insert your personal access token",
-                        "name": "Authorization",
-                        "in": "header",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "the org's id",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No Content"
-                    }
-                }
-            }
-        },
         "/orgs/{org_id}": {
             "get": {
                 "produces": [
@@ -1059,6 +1025,38 @@ const docTemplate = `{
                                 "$ref": "#/definitions/Org"
                             }
                         }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Deletes the given org. Requires admin rights.",
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "Orgs"
+                ],
+                "summary": "Delete an organization",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "default": "Bearer \u003cpersonal access token\u003e",
+                        "description": "Insert your personal access token",
+                        "name": "Authorization",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "the org's id",
+                        "name": "org_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
                     }
                 }
             }
@@ -1729,7 +1727,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/Secret"
+                            "$ref": "#/definitions/SecretPatch"
                         }
                     }
                 ],
@@ -1777,7 +1775,7 @@ const docTemplate = `{
         },
         "/queue/info": {
             "get": {
-                "description": "TODO: link the InfoT response object - this is blocked, until the ` + "`" + `swaggo/swag` + "`" + ` tool dependency is v1.18.12 or newer",
+                "description": "Returns pipeline queue information with agent details",
                 "produces": [
                     "application/json"
                 ],
@@ -1799,10 +1797,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/QueueInfo"
                         }
                     }
                 }
@@ -2684,7 +2679,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/Cron"
+                            "$ref": "#/definitions/CronPatch"
                         }
                     }
                 ],
@@ -2698,7 +2693,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/logs/{number}": {
+        "/repos/{repo_id}/logs/{pipeline_number}": {
             "delete": {
                 "produces": [
                     "text/plain"
@@ -2726,7 +2721,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -2738,7 +2733,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/logs/{number}/{stepID}": {
+        "/repos/{repo_id}/logs/{pipeline_number}/{step_id}": {
             "get": {
                 "produces": [
                     "application/json"
@@ -2766,14 +2761,14 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "integer",
                         "description": "the step id",
-                        "name": "stepID",
+                        "name": "step_id",
                         "in": "path",
                         "required": true
                     }
@@ -2789,9 +2784,7 @@ const docTemplate = `{
                         }
                     }
                 }
-            }
-        },
-        "/repos/{repo_id}/logs/{number}/{stepId}": {
+            },
             "delete": {
                 "produces": [
                     "text/plain"
@@ -2819,14 +2812,14 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     },
                     {
                         "type": "integer",
                         "description": "the step id",
-                        "name": "stepId",
+                        "name": "step_id",
                         "in": "path",
                         "required": true
                     }
@@ -3048,7 +3041,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/pipelines/{number}": {
+        "/repos/{repo_id}/pipelines/{pipeline_number}": {
             "get": {
                 "produces": [
                     "application/json"
@@ -3076,7 +3069,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline, OR 'latest'",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -3118,7 +3111,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     },
@@ -3171,7 +3164,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -3183,7 +3176,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/pipelines/{number}/approve": {
+        "/repos/{repo_id}/pipelines/{pipeline_number}/approve": {
             "post": {
                 "produces": [
                     "application/json"
@@ -3211,7 +3204,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -3226,7 +3219,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/pipelines/{number}/cancel": {
+        "/repos/{repo_id}/pipelines/{pipeline_number}/cancel": {
             "post": {
                 "produces": [
                     "text/plain"
@@ -3254,7 +3247,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -3266,7 +3259,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/pipelines/{number}/config": {
+        "/repos/{repo_id}/pipelines/{pipeline_number}/config": {
             "get": {
                 "produces": [
                     "application/json"
@@ -3294,7 +3287,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -3312,7 +3305,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/pipelines/{number}/decline": {
+        "/repos/{repo_id}/pipelines/{pipeline_number}/decline": {
             "post": {
                 "produces": [
                     "application/json"
@@ -3340,7 +3333,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -3355,7 +3348,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/repos/{repo_id}/pipelines/{number}/metadata": {
+        "/repos/{repo_id}/pipelines/{pipeline_number}/metadata": {
             "get": {
                 "produces": [
                     "application/json"
@@ -3383,7 +3376,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the number of the pipeline",
-                        "name": "number",
+                        "name": "pipeline_number",
                         "in": "path",
                         "required": true
                     }
@@ -3924,7 +3917,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/Secret"
+                            "$ref": "#/definitions/SecretPatch"
                         }
                     }
                 ],
@@ -4116,7 +4109,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/Secret"
+                            "$ref": "#/definitions/SecretPatch"
                         }
                     }
                 ],
@@ -4173,7 +4166,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/stream/logs/{repo_id}/{pipeline}/{stepID}": {
+        "/stream/logs/{repo_id}/{pipeline}/{step_id}": {
             "get": {
                 "produces": [
                     "text/plain"
@@ -4200,7 +4193,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "the step id",
-                        "name": "stepID",
+                        "name": "step_id",
                         "in": "path",
                         "required": true
                     }
@@ -4297,6 +4290,12 @@ const docTemplate = `{
                         "type": "boolean",
                         "description": "query all repos, including inactive ones",
                         "name": "all",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "filter repos by name",
+                        "name": "name",
                         "in": "query"
                     }
                 ],
@@ -4473,6 +4472,19 @@ const docTemplate = `{
                         "name": "login",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "specify forge (else default will be used)",
+                        "name": "forge_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "specify user id at forge (else fallback to login)",
+                        "name": "forge_remote_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4508,6 +4520,19 @@ const docTemplate = `{
                         "name": "login",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "specify forge (else default will be used)",
+                        "name": "forge_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "specify user id at forge (else fallback to login)",
+                        "name": "forge_remote_id",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4649,6 +4674,20 @@ const docTemplate = `{
                 }
             }
         },
+        "CancelInfo": {
+            "type": "object",
+            "properties": {
+                "canceled_by_step": {
+                    "type": "string"
+                },
+                "canceled_by_user": {
+                    "type": "string"
+                },
+                "superseded_by": {
+                    "type": "integer"
+                }
+            }
+        },
         "Config": {
             "type": "object",
             "properties": {
@@ -4676,7 +4715,11 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "creator_id": {
+                    "description": "TODO: drop with next major version",
                     "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "integer"
@@ -4693,6 +4736,41 @@ const docTemplate = `{
                 "schedule": {
                     "description": "@weekly,\t3min, ...",
                     "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "CronPatch": {
+            "type": "object",
+            "properties": {
+                "branch": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "schedule": {
+                    "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
+                },
+                "variables": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 }
             }
         },
@@ -4764,6 +4842,37 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer"
+                },
+                "oauth_host": {
+                    "description": "public url for oauth if different from url",
+                    "type": "string"
+                },
+                "skip_verify": {
+                    "type": "boolean"
+                },
+                "type": {
+                    "$ref": "#/definitions/model.ForgeType"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "ForgeWithOAuthClientSecret": {
+            "type": "object",
+            "properties": {
+                "additional_options": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "client": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "oauth_client_secret": {
+                    "type": "string"
                 },
                 "oauth_host": {
                     "description": "public url for oauth if different from url",
@@ -4889,6 +4998,9 @@ const docTemplate = `{
                 "branch": {
                     "type": "string"
                 },
+                "cancel_info": {
+                    "$ref": "#/definitions/CancelInfo"
+                },
                 "changed_files": {
                     "type": "array",
                     "items": {
@@ -4901,6 +5013,10 @@ const docTemplate = `{
                 "created": {
                     "type": "integer"
                 },
+                "cron": {
+                    "description": "name of the cron job",
+                    "type": "string"
+                },
                 "deploy_task": {
                     "type": "string"
                 },
@@ -4910,11 +5026,17 @@ const docTemplate = `{
                 "errors": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.PipelineError"
+                        "$ref": "#/definitions/errors.PipelineError"
                     }
                 },
                 "event": {
                     "$ref": "#/definitions/WebhookEvent"
+                },
+                "event_reason": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "finished": {
                     "type": "integer"
@@ -4949,11 +5071,17 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "pr_milestone": {
+                    "type": "string"
+                },
                 "ref": {
                     "type": "string"
                 },
                 "refspec": {
                     "type": "string"
+                },
+                "rerun_count": {
+                    "type": "integer"
                 },
                 "reviewed": {
                     "type": "integer"
@@ -4986,6 +5114,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "version": {
+                    "type": "string"
+                },
                 "workflows": {
                     "type": "array",
                     "items": {
@@ -5016,6 +5147,49 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                }
+            }
+        },
+        "QueueInfo": {
+            "type": "object",
+            "properties": {
+                "paused": {
+                    "type": "boolean"
+                },
+                "pending": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.QueueTask"
+                    }
+                },
+                "running": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.QueueTask"
+                    }
+                },
+                "stats": {
+                    "type": "object",
+                    "properties": {
+                        "pending_count": {
+                            "type": "integer"
+                        },
+                        "running_count": {
+                            "type": "integer"
+                        },
+                        "waiting_on_deps_count": {
+                            "type": "integer"
+                        },
+                        "worker_count": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "waiting_on_deps": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.QueueTask"
+                    }
                 }
             }
         },
@@ -5078,6 +5252,15 @@ const docTemplate = `{
                 "clone_url_ssh": {
                     "type": "string"
                 },
+                "config_extension_endpoint": {
+                    "type": "string"
+                },
+                "config_extension_exclusive": {
+                    "type": "boolean"
+                },
+                "config_extension_netrc": {
+                    "type": "boolean"
+                },
                 "config_file": {
                     "type": "string"
                 },
@@ -5096,6 +5279,14 @@ const docTemplate = `{
                 },
                 "full_name": {
                     "type": "string"
+                },
+                "has_forge_name_conflict": {
+                    "description": "HasForgeNameConflict is true if forge returned a repo with same name but different forge remote id",
+                    "type": "boolean"
+                },
+                "has_no_forge_repo": {
+                    "description": "HasNoForgeRepo is true if repo only exist in the woodpecker store and not at the forge anymore",
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "integer"
@@ -5121,8 +5312,20 @@ const docTemplate = `{
                 "private": {
                     "type": "boolean"
                 },
+                "registry_extension_endpoint": {
+                    "type": "string"
+                },
+                "registry_extension_netrc": {
+                    "type": "boolean"
+                },
                 "require_approval": {
                     "$ref": "#/definitions/model.ApprovalMode"
+                },
+                "secret_extension_endpoint": {
+                    "type": "string"
+                },
+                "secret_extension_netrc": {
+                    "type": "boolean"
                 },
                 "timeout": {
                     "type": "integer"
@@ -5168,6 +5371,15 @@ const docTemplate = `{
                 "clone_url_ssh": {
                     "type": "string"
                 },
+                "config_extension_endpoint": {
+                    "type": "string"
+                },
+                "config_extension_exclusive": {
+                    "type": "boolean"
+                },
+                "config_extension_netrc": {
+                    "type": "boolean"
+                },
                 "config_file": {
                     "type": "string"
                 },
@@ -5186,6 +5398,14 @@ const docTemplate = `{
                 },
                 "full_name": {
                     "type": "string"
+                },
+                "has_forge_name_conflict": {
+                    "description": "HasForgeNameConflict is true if forge returned a repo with same name but different forge remote id",
+                    "type": "boolean"
+                },
+                "has_no_forge_repo": {
+                    "description": "HasNoForgeRepo is true if repo only exist in the woodpecker store and not at the forge anymore",
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "integer"
@@ -5214,8 +5434,20 @@ const docTemplate = `{
                 "private": {
                     "type": "boolean"
                 },
+                "registry_extension_endpoint": {
+                    "type": "string"
+                },
+                "registry_extension_netrc": {
+                    "type": "boolean"
+                },
                 "require_approval": {
                     "$ref": "#/definitions/model.ApprovalMode"
+                },
+                "secret_extension_endpoint": {
+                    "type": "string"
+                },
+                "secret_extension_netrc": {
+                    "type": "boolean"
                 },
                 "timeout": {
                     "type": "integer"
@@ -5249,6 +5481,15 @@ const docTemplate = `{
                         "$ref": "#/definitions/WebhookEvent"
                     }
                 },
+                "config_extension_endpoint": {
+                    "type": "string"
+                },
+                "config_extension_exclusive": {
+                    "type": "boolean"
+                },
+                "config_extension_netrc": {
+                    "type": "boolean"
+                },
                 "config_file": {
                     "type": "string"
                 },
@@ -5258,8 +5499,20 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "registry_extension_endpoint": {
+                    "type": "string"
+                },
+                "registry_extension_netrc": {
+                    "type": "boolean"
+                },
                 "require_approval": {
                     "type": "string"
+                },
+                "secret_extension_endpoint": {
+                    "type": "string"
+                },
+                "secret_extension_netrc": {
+                    "type": "boolean"
                 },
                 "timeout": {
                     "type": "integer"
@@ -5306,11 +5559,40 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "note": {
+                    "type": "string"
+                },
                 "org_id": {
                     "type": "integer"
                 },
                 "repo_id": {
                     "type": "integer"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "SecretPatch": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/WebhookEvent"
+                    }
+                },
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
                 },
                 "value": {
                     "type": "string"
@@ -5326,6 +5608,7 @@ const docTemplate = `{
                 "success",
                 "failure",
                 "killed",
+                "canceled",
                 "error",
                 "blocked",
                 "declined",
@@ -5333,6 +5616,7 @@ const docTemplate = `{
             ],
             "x-enum-comments": {
                 "StatusBlocked": "waiting for approval",
+                "StatusCanceled": "canceled but hasn't been started",
                 "StatusCreated": "created / internal use only",
                 "StatusDeclined": "blocked and declined",
                 "StatusError": "error with the config / while parsing / some other system problem",
@@ -5340,16 +5624,17 @@ const docTemplate = `{
                 "StatusKilled": "killed by user",
                 "StatusPending": "pending to be executed",
                 "StatusRunning": "currently running",
-                "StatusSkipped": "skipped as another step failed",
+                "StatusSkipped": "skipped as per condition of current workflow failed/success state",
                 "StatusSuccess": "successfully finished"
             },
             "x-enum-descriptions": [
-                "skipped as another step failed",
+                "skipped as per condition of current workflow failed/success state",
                 "pending to be executed",
                 "currently running",
                 "successfully finished",
                 "failed to finish (exit code != 0)",
                 "killed by user",
+                "canceled but hasn't been started",
                 "error with the config / while parsing / some other system problem",
                 "waiting for approval",
                 "blocked and declined",
@@ -5362,6 +5647,7 @@ const docTemplate = `{
                 "StatusSuccess",
                 "StatusFailure",
                 "StatusKilled",
+                "StatusCanceled",
                 "StatusError",
                 "StatusBlocked",
                 "StatusDeclined",
@@ -5432,6 +5718,18 @@ const docTemplate = `{
                 "agent_id": {
                     "type": "integer"
                 },
+                "concurrency_group": {
+                    "description": "ConcurrencyGroup identifies tasks that are limited against each other.\nIt is empty when no concurrency limit applies.",
+                    "type": "string"
+                },
+                "concurrency_limit": {
+                    "description": "ConcurrencyLimit is the maximum number of tasks sharing the same\nConcurrencyGroup that may run at once. A value \u003c= 0 means unlimited.",
+                    "type": "integer"
+                },
+                "created": {
+                    "description": "Created is the unix timestamp the task's pipeline was created at. It\ndefines the queue ordering across pipelines.",
+                    "type": "integer"
+                },
                 "dep_status": {
                     "type": "object",
                     "additionalProperties": {
@@ -5453,6 +5751,18 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "name": {
+                    "type": "string"
+                },
+                "pid": {
+                    "type": "integer"
+                },
+                "pipeline_id": {
+                    "type": "integer"
+                },
+                "repo_id": {
+                    "type": "integer"
+                },
                 "run_on": {
                     "type": "array",
                     "items": {
@@ -5468,6 +5778,9 @@ const docTemplate = `{
                     "description": "Admin indicates the user is a system administrator.\n\nNOTE: If the username is part of the WOODPECKER_ADMIN\nenvironment variable, this value will be set to true on login.",
                     "type": "boolean"
                 },
+                "admin_env": {
+                    "type": "boolean"
+                },
                 "avatar_url": {
                     "description": "the avatar url for this user.",
                     "type": "string"
@@ -5478,6 +5791,9 @@ const docTemplate = `{
                 },
                 "forge_id": {
                     "type": "integer"
+                },
+                "forge_remote_id": {
+                    "type": "string"
                 },
                 "id": {
                     "description": "the id for this user.\n\nrequired: true",
@@ -5499,6 +5815,7 @@ const docTemplate = `{
                 "push",
                 "pull_request",
                 "pull_request_closed",
+                "pull_request_metadata",
                 "tag",
                 "release",
                 "deployment",
@@ -5509,6 +5826,7 @@ const docTemplate = `{
                 "EventPush",
                 "EventPull",
                 "EventPullClosed",
+                "EventPullMetadata",
                 "EventTag",
                 "EventRelease",
                 "EventDeploy",
@@ -5516,12 +5834,55 @@ const docTemplate = `{
                 "EventManual"
             ]
         },
+        "errors.PipelineError": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "is_warning": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "type": {
+                    "$ref": "#/definitions/errors.PipelineErrorType"
+                }
+            }
+        },
+        "errors.PipelineErrorType": {
+            "type": "string",
+            "enum": [
+                "linter",
+                "deprecation",
+                "compiler",
+                "generic",
+                "bad_habit"
+            ],
+            "x-enum-comments": {
+                "PipelineErrorTypeBadHabit": "some bad-habit error",
+                "PipelineErrorTypeCompiler": "some error with the config semantics",
+                "PipelineErrorTypeDeprecation": "using some deprecated feature",
+                "PipelineErrorTypeGeneric": "some generic error",
+                "PipelineErrorTypeLinter": "some error with the config syntax"
+            },
+            "x-enum-descriptions": [
+                "some error with the config syntax",
+                "using some deprecated feature",
+                "some error with the config semantics",
+                "some generic error",
+                "some bad-habit error"
+            ],
+            "x-enum-varnames": [
+                "PipelineErrorTypeLinter",
+                "PipelineErrorTypeDeprecation",
+                "PipelineErrorTypeCompiler",
+                "PipelineErrorTypeGeneric",
+                "PipelineErrorTypeBadHabit"
+            ]
+        },
         "metadata.Author": {
             "type": "object",
             "properties": {
-                "avatar": {
-                    "type": "string"
-                },
                 "email": {
                     "type": "string"
                 },
@@ -5560,6 +5921,9 @@ const docTemplate = `{
                 "message": {
                     "type": "string"
                 },
+                "milestone": {
+                    "type": "string"
+                },
                 "ref": {
                     "type": "string"
                 },
@@ -5568,8 +5932,36 @@ const docTemplate = `{
                 },
                 "sha": {
                     "type": "string"
+                },
+                "timestamp": {
+                    "type": "integer"
                 }
             }
+        },
+        "metadata.Event": {
+            "type": "string",
+            "enum": [
+                "push",
+                "pull_request",
+                "pull_request_closed",
+                "pull_request_metadata",
+                "tag",
+                "release",
+                "deployment",
+                "cron",
+                "manual"
+            ],
+            "x-enum-varnames": [
+                "EventPush",
+                "EventPull",
+                "EventPullClosed",
+                "EventPullMetadata",
+                "EventTag",
+                "EventRelease",
+                "EventDeploy",
+                "EventCron",
+                "EventManual"
+            ]
         },
         "metadata.Forge": {
             "type": "object",
@@ -5630,7 +6022,13 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "event": {
-                    "type": "string"
+                    "$ref": "#/definitions/metadata.Event"
+                },
+                "event_reason": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "finished": {
                     "type": "integer"
@@ -5642,6 +6040,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "parent": {
+                    "type": "integer"
+                },
+                "rerun_count": {
                     "type": "integer"
                 },
                 "started": {
@@ -5678,6 +6079,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "org_id": {
+                    "type": "integer"
                 },
                 "owner": {
                     "type": "string"
@@ -5803,6 +6207,71 @@ const docTemplate = `{
                 "ForgeTypeAddon"
             ]
         },
+        "model.QueueTask": {
+            "type": "object",
+            "properties": {
+                "agent_id": {
+                    "type": "integer"
+                },
+                "agent_name": {
+                    "type": "string"
+                },
+                "concurrency_group": {
+                    "description": "ConcurrencyGroup identifies tasks that are limited against each other.\nIt is empty when no concurrency limit applies.",
+                    "type": "string"
+                },
+                "concurrency_limit": {
+                    "description": "ConcurrencyLimit is the maximum number of tasks sharing the same\nConcurrencyGroup that may run at once. A value \u003c= 0 means unlimited.",
+                    "type": "integer"
+                },
+                "created": {
+                    "description": "Created is the unix timestamp the task's pipeline was created at. It\ndefines the queue ordering across pipelines.",
+                    "type": "integer"
+                },
+                "dep_status": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/StatusValue"
+                    }
+                },
+                "dependencies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "labels": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "pid": {
+                    "type": "integer"
+                },
+                "pipeline_id": {
+                    "type": "integer"
+                },
+                "pipeline_number": {
+                    "type": "integer"
+                },
+                "repo_id": {
+                    "type": "integer"
+                },
+                "run_on": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "model.TrustedConfiguration": {
             "type": "object",
             "properties": {
@@ -5877,52 +6346,6 @@ const docTemplate = `{
                     "$ref": "#/definitions/StatusValue"
                 }
             }
-        },
-        "types.PipelineError": {
-            "type": "object",
-            "properties": {
-                "data": {},
-                "is_warning": {
-                    "type": "boolean"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "type": {
-                    "$ref": "#/definitions/types.PipelineErrorType"
-                }
-            }
-        },
-        "types.PipelineErrorType": {
-            "type": "string",
-            "enum": [
-                "linter",
-                "deprecation",
-                "compiler",
-                "generic",
-                "bad_habit"
-            ],
-            "x-enum-comments": {
-                "PipelineErrorTypeBadHabit": "some bad-habit error",
-                "PipelineErrorTypeCompiler": "some error with the config semantics",
-                "PipelineErrorTypeDeprecation": "using some deprecated feature",
-                "PipelineErrorTypeGeneric": "some generic error",
-                "PipelineErrorTypeLinter": "some error with the config syntax"
-            },
-            "x-enum-descriptions": [
-                "some error with the config syntax",
-                "using some deprecated feature",
-                "some error with the config semantics",
-                "some generic error",
-                "some bad-habit error"
-            ],
-            "x-enum-varnames": [
-                "PipelineErrorTypeLinter",
-                "PipelineErrorTypeDeprecation",
-                "PipelineErrorTypeCompiler",
-                "PipelineErrorTypeGeneric",
-                "PipelineErrorTypeBadHabit"
-            ]
         }
     }
 }`

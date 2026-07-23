@@ -36,75 +36,35 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/shared/token"
 )
 
+// getAgentName finds an agent's name, utilizing a map as a cache.
+func getAgentName(store store.Store, agentNameMap map[int64]string, agentID int64) (string, bool) {
+	// 1. Check the cache first.
+	name, exists := agentNameMap[agentID]
+	if exists {
+		return name, true
+	}
+
+	// 2. If not in cache, query the store.
+	agent, err := store.AgentFind(agentID)
+	if err != nil || agent == nil {
+		// Agent not found or an error occurred.
+		return "", false
+	}
+
+	// 3. Found the agent, update the cache and return the name.
+	if agent.Name != "" {
+		agentNameMap[agentID] = agent.Name
+		return agent.Name, true
+	}
+
+	return "", false
+}
+
 // backgroundPipelineCreationTimeout caps how long a webhook-triggered pipeline
 // creation may keep running after the HTTP handler has already responded 202
 // Accepted (see PostHook). It bounds the detached background goroutine so a
 // stuck creation cannot leak indefinitely.
 const backgroundPipelineCreationTimeout = 2 * time.Minute
-
-type pipelineCreateResult struct {
-	pipeline *model.Pipeline
-	err      error
-}
-
-// GetQueueInfo
-//
-//	@Summary		Get pipeline queue information
-//	@Description	TODO: link the InfoT response object - this is blocked, until the `swaggo/swag` tool dependency is v1.18.12 or newer
-//	@Router			/queue/info [get]
-//	@Produce		json
-//	@Success		200	{object}	map[string]string
-//	@Tags			Pipeline queues
-//	@Param			Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func GetQueueInfo(c *gin.Context) {
-	c.IndentedJSON(http.StatusOK,
-		server.Config.Services.Queue.Info(c),
-	)
-}
-
-// PauseQueue
-//
-//	@Summary	Pause the pipeline queue
-//	@Router		/queue/pause [post]
-//	@Produce	plain
-//	@Success	204
-//	@Tags		Pipeline queues
-//	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func PauseQueue(c *gin.Context) {
-	server.Config.Services.Queue.Pause()
-	c.Status(http.StatusNoContent)
-}
-
-// ResumeQueue
-//
-//	@Summary	Resume the pipeline queue
-//	@Router		/queue/resume [post]
-//	@Produce	plain
-//	@Success	204
-//	@Tags		Pipeline queues
-//	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func ResumeQueue(c *gin.Context) {
-	server.Config.Services.Queue.Resume()
-	c.Status(http.StatusNoContent)
-}
-
-// BlockTilQueueHasRunningItem
-//
-//	@Summary	Block til pipeline queue has a running item
-//	@Router		/queue/norunningpipelines [get]
-//	@Produce	plain
-//	@Success	204
-//	@Tags		Pipeline queues
-//	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-func BlockTilQueueHasRunningItem(c *gin.Context) {
-	for {
-		info := server.Config.Services.Queue.Info(c)
-		if info.Stats.Running == 0 {
-			break
-		}
-	}
-	c.Status(http.StatusNoContent)
-}
 
 // PostHook
 //
@@ -242,7 +202,7 @@ func PostHook(c *gin.Context) {
 	// 5. Check if pull requests are allowed for this repo
 	//
 
-	if (pipelineFromForge.Event == model.EventPull || pipelineFromForge.Event == model.EventPullClosed) && !repo.AllowPull {
+	if pipelineFromForge.IsPullRequest() && !repo.AllowPull {
 		log.Debug().Str("repo", repo.FullName).Msg("ignoring hook: pull requests are disabled for this repo in woodpecker")
 		c.Status(http.StatusNoContent)
 		return
@@ -251,61 +211,57 @@ func PostHook(c *gin.Context) {
 	//
 	// 6. Finally create a pipeline
 	//
-	respondWebhookPipelineCreate(c, _store, repo, pipelineFromForge)
-}
+	// Pipeline creation can be slow (forge round-trips, config fetching). To
+	// avoid the forge timing out and retrying the webhook delivery, we wait only
+	// up to WebhookSyncTimeout for creation to finish. If it completes in time we
+	// respond synchronously with the created pipeline (preserving the old
+	// behavior and API response). If it takes longer we respond 202 Accepted and
+	// let creation finish in the background.
+	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), backgroundPipelineCreationTimeout)
 
-// respondWebhookPipelineCreate runs pipeline.Create with a hybrid sync/async ack:
-// wait up to WebhookSyncTimeout, then either respond with the create result or
-// return 202 Accepted and finish creation in the background.
-func respondWebhookPipelineCreate(c *gin.Context, _store store.Store, repo *model.Repo, pipelineFromForge *model.Pipeline) {
-	bgCtx, cancel := context.WithTimeout(context.Background(), backgroundPipelineCreationTimeout)
+	done := make(chan struct{})
+	var pl *model.Pipeline
 
-	done := make(chan pipelineCreateResult, 1)
 	go func() {
 		defer cancel()
-		pl, createErr := pipeline.Create(bgCtx, _store, repo, pipelineFromForge)
-		done <- pipelineCreateResult{pipeline: pl, err: createErr}
+		pl, err = pipeline.Create(bgCtx, _store, repo, pipelineFromForge)
+		if err != nil {
+			log.Error().Err(err).Str("repo", repo.FullName).Msg("could not create pipeline from webhook")
+		}
+		done <- struct{}{}
 	}()
 
-	var result pipelineCreateResult
 	syncTimeout := server.Config.Server.WebhookSyncTimeout
 	if syncTimeout > 0 {
 		select {
-		case result = <-done:
+		case <-done:
+			// handle synchronous
 		case <-time.After(syncTimeout):
 			log.Debug().Str("repo", repo.FullName).Dur("timeout", syncTimeout).Msg("pipeline creation exceeded webhook sync timeout, continuing in background")
 			c.JSON(http.StatusAccepted, nil)
-			go logBackgroundWebhookCreate(repo.FullName, done)
+			// do async
 			return
 		}
 	} else {
-		result = <-done
+		// we do synchronous
+		<-done
 	}
 
-	if result.err != nil {
-		handlePipelineErr(c, result.err)
-		return
+	if err != nil {
+		handlePipelineErr(c, err)
+	} else {
+		c.JSON(http.StatusOK, pl)
 	}
-	c.JSON(http.StatusOK, result.pipeline)
-}
-
-func logBackgroundWebhookCreate(repoFullName string, done <-chan pipelineCreateResult) {
-	result := <-done
-	if result.err == nil || errors.Is(result.err, pipeline.ErrFiltered) {
-		return
-	}
-	log.Error().Err(result.err).Str("repo", repoFullName).Msg("could not create pipeline from webhook")
 }
 
 func getRepoFromToken(store store.Store, t *token.Token) (*model.Repo, error) {
 	if t.Get("repo-forge-remote-id") != "" {
-		// TODO: use both the forge ID and repo forge remote ID
-		/*forgeID, err := strconv.ParseInt(t.Get("forge-id"), 10, 64)
+		forgeID, err := strconv.ParseInt(t.Get("forge-id"), 10, 64)
 		if err != nil {
 			return nil, err
-		}*/
+		}
 
-		return store.GetRepoForgeID(model.ForgeRemoteID(t.Get("repo-forge-remote-id")))
+		return store.GetRepoForgeID(forgeID, model.ForgeRemoteID(t.Get("repo-forge-remote-id")))
 	}
 
 	// get the repo by the repo-id

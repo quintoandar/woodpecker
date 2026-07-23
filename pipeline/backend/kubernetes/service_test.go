@@ -19,6 +19,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	kube_core_v1 "k8s.io/api/core/v1"
+	kube_meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 )
@@ -37,55 +40,111 @@ func TestServiceName(t *testing.T) {
 	assert.Equal(t, "wp-svc-01he8bebctabr3kgk0qj36d2me-awesome-service", name)
 }
 
-func TestService(t *testing.T) {
+func TestHeadlessService(t *testing.T) {
 	expected := `
 	{
 	  "metadata": {
-	    "name": "wp-svc-01he8bebctabr3kgk0qj36d2me-0-bar",
-	    "namespace": "foo",
-	    "creationTimestamp": null
+		"name": "wp-hsvc-11301",
+		"namespace": "foo"
 	  },
 	  "spec": {
-	    "ports": [
-	      {
-	        "name": "port-1",
-	        "port": 1,
-	        "targetPort": 1
-	      },
-	      {
-	        "name": "port-2",
-	        "protocol": "TCP",
-	        "port": 2,
-	        "targetPort": 2
-	      },
-	      {
-	        "name": "port-3",
-	        "protocol": "UDP",
-	        "port": 3,
-	        "targetPort": 3
-	      }
-	    ],
-	    "selector": {
-	      "service": "wp-svc-01he8bebctabr3kgk0qj36d2me-0-bar"
-	    },
-	    "type": "ClusterIP"
+		"selector": {
+		  "woodpecker-ci.org/task-uuid": "11301"
+		},
+		"clusterIP": "None",
+		"type": "ClusterIP"
 	  },
 	  "status": {
-	    "loadBalancer": {}
+		"loadBalancer": {}
 	  }
 	}`
-	ports := []types.Port{
-		{Number: 1},
-		{Number: 2, Protocol: "tcp"},
-		{Number: 3, Protocol: "udp"},
-	}
-	s, err := mkService(&types.Step{
-		Name:  "bar",
-		UUID:  "01he8bebctabr3kgk0qj36d2me-0",
-		Ports: ports,
-	}, &config{Namespace: "foo"})
-	assert.NoError(t, err)
+
+	s, err := mkHeadlessService("foo", "11301")
+	assert.NoError(t, err, "expected no error when creating headless service")
 	j, err := json.Marshal(s)
-	assert.NoError(t, err)
-	assert.JSONEq(t, expected, string(j))
+	assert.NoError(t, err, "expected no error when marshaling headless service to JSON")
+	assert.JSONEq(t, expected, string(j), "expected headless service JSON to match")
+}
+
+func TestInvalidHeadlessService(t *testing.T) {
+	_, err := mkHeadlessService("foo", "invalid_task_uuid!")
+	assert.Error(t, err, "expected error due to invalid task UUID")
+}
+
+func TestStartHeadlessService(t *testing.T) {
+	t.Run("successfully creates headless service", func(t *testing.T) {
+		engine := &kube{
+			client: fake.NewClientset(),
+			config: &config{Namespace: "test-namespace"},
+		}
+
+		svc, err := startHeadlessService(t.Context(), engine, "foo", "11301")
+		assert.NoError(t, err, "expected no error when starting headless service")
+
+		assert.NotNil(t, svc, "expected headless service to be created")
+		assert.Equal(t, "wp-hsvc-11301", svc.Name, "expected headless service name to match")
+		assert.Equal(t, "foo", svc.Namespace, "expected headless service namespace to match")
+		assert.Equal(t, kube_core_v1.ServiceTypeClusterIP, svc.Spec.Type, "expected headless service type to be ClusterIP")
+		assert.Equal(t, "None", svc.Spec.ClusterIP, "expected headless service ClusterIP to be 'None'")
+		assert.Equal(t, map[string]string{TaskUUIDLabel: "11301"}, svc.Spec.Selector)
+
+		createdSvc, err := engine.client.CoreV1().Services("foo").Get(t.Context(), "wp-hsvc-11301", kube_meta_v1.GetOptions{})
+		assert.NoError(t, err, "expected no error when getting the created service")
+		assert.Equal(t, svc.Name, createdSvc.Name, "expected created service name to match")
+	})
+
+	t.Run("error on invalid task UUID resulting in invalid domain-name", func(t *testing.T) {
+		engine := &kube{
+			client: fake.NewClientset(),
+			config: &config{Namespace: "test-namespace"},
+		}
+
+		_, err := startHeadlessService(t.Context(), engine, "test-namespace", "invalid_task_uuid!")
+		assert.Error(t, err, "expected error due to invalid task UUID")
+	})
+}
+
+func TestStopHeadlessService(t *testing.T) {
+	t.Run("successfully deletes headless service", func(t *testing.T) {
+		engine := &kube{
+			client: fake.NewClientset(),
+			config: &config{Namespace: "test-namespace"},
+		}
+
+		// arrage
+		_, err := startHeadlessService(t.Context(), engine, "foo", "11301")
+		assert.NoError(t, err, "expected no error when starting headless service")
+
+		_, err = engine.client.CoreV1().Services("foo").Get(t.Context(), "wp-hsvc-11301", kube_meta_v1.GetOptions{})
+		assert.NoError(t, err, "expected no error when getting the created service")
+
+		// act
+		err = engine.stopHeadlessService(t.Context(), engine, "foo", "11301")
+		assert.NoError(t, err, "expected no error when deleting headless service")
+
+		// assert
+		_, err = engine.client.CoreV1().Services("foo").Get(t.Context(), "wp-hsvc-11301", kube_meta_v1.GetOptions{})
+		assert.Error(t, err, "expected error when getting a deleted service")
+		assert.True(t, err != nil, "expected error to be non-nil")
+	})
+
+	t.Run("handles non-existent service gracefully", func(t *testing.T) {
+		engine := &kube{
+			client: fake.NewClientset(),
+			config: &config{Namespace: "test-namespace"},
+		}
+
+		err := engine.stopHeadlessService(t.Context(), engine, "foo", "nonexistent")
+		assert.NoError(t, err, "expected no error when deleting a non-existent service")
+	})
+
+	t.Run("error on invalid task UUID resulting in invalid domain-name", func(t *testing.T) {
+		engine := &kube{
+			client: fake.NewClientset(),
+			config: &config{Namespace: "test-namespace"},
+		}
+
+		err := engine.stopHeadlessService(t.Context(), engine, "test-namespace", "invalid_task_uuid!")
+		assert.Error(t, err, "expected error due to invalid task UUID")
+	})
 }

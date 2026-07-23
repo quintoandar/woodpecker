@@ -3,6 +3,12 @@ export interface User {
   id: number;
   // The unique identifier for the account.
 
+  forge_id: number;
+  // The unique identifier of the forge the account belongs to.
+
+  forge_remote_id: string;
+  // The unique identifier of user at the remote forge.
+
   login: string;
   // The login name for the account.
 
@@ -14,6 +20,9 @@ export interface User {
 
   admin: boolean;
   // Whether the account has administrative privileges.
+
+  admin_env: boolean;
+  // Whether the administrative privileges are defined at env var level.
 
   active: boolean;
   // Whether the account is currently active.

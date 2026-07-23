@@ -36,14 +36,14 @@ import (
 func TestGraphQLEndpoint(t *testing.T) {
 	t.Parallel()
 
-	cloud, err := New(Opts{URL: defaultURL})
+	cloud, err := New(1, Opts{URL: defaultURL})
 	require.NoError(t, err)
 	cloudClient, ok := cloud.(*client)
 	require.True(t, ok)
 	assert.Equal(t, "https://api.github.com/graphql", cloudClient.graphqlEndpoint())
 	assert.Equal(t, defaultAPI, cloudClient.API)
 
-	ghe, err := New(Opts{URL: "https://ghe.example.com/"})
+	ghe, err := New(1, Opts{URL: "https://ghe.example.com/"})
 	require.NoError(t, err)
 	gheClient, ok := ghe.(*client)
 	require.True(t, ok)
@@ -56,7 +56,7 @@ func withGraphQLServer(t *testing.T, handler http.HandlerFunc) *client {
 	s := httptest.NewServer(handler)
 	t.Cleanup(s.Close)
 
-	forge, err := New(Opts{URL: s.URL, SkipVerify: true})
+	forge, err := New(1, Opts{URL: s.URL, SkipVerify: true})
 	require.NoError(t, err)
 	forgeClient, ok := forge.(*client)
 	require.True(t, ok)

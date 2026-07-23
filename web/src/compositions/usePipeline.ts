@@ -6,6 +6,7 @@ import { useI18n } from 'vue-i18n';
 import { useDate } from '~/compositions/useDate';
 import { useElapsedTime } from '~/compositions/useElapsedTime';
 import type { Pipeline } from '~/lib/api/types';
+import { escapeHtml } from '~/lib/utils';
 
 const { toLocaleString, timeAgo, prettyDuration } = useDate();
 
@@ -75,10 +76,10 @@ export default (pipeline: Ref<Pipeline | undefined>) => {
     return prettyDuration(durationElapsed.value);
   });
 
-  const message = computed(() => emojify(pipeline.value?.message ?? ''));
+  const message = computed(() => emojify(escapeHtml(pipeline.value?.message ?? '')));
   const shortMessage = computed(() => message.value.split('\n')[0]);
 
-  const prTitleWithDescription = computed(() => emojify(pipeline.value?.title ?? ''));
+  const prTitleWithDescription = computed(() => emojify(escapeHtml(pipeline.value?.title ?? '')));
   const prTitle = computed(() => prTitleWithDescription.value.split('\n')[0]);
 
   const prettyRef = computed(() => {
@@ -94,12 +95,18 @@ export default (pipeline: Ref<Pipeline | undefined>) => {
       return pipeline.value.ref.replaceAll('refs/tags/', '');
     }
 
-    if (pipeline.value?.event === 'pull_request' || pipeline.value?.event === 'pull_request_closed') {
+    if (
+      pipeline.value?.event === 'pull_request' ||
+      pipeline.value?.event === 'pull_request_closed' ||
+      pipeline.value?.event === 'pull_request_metadata'
+    ) {
       return `#${pipeline.value.ref
         .replaceAll('refs/pull/', '')
         .replaceAll('refs/merge-requests/', '')
+        .replaceAll('refs/pull-requests/', '')
         .replaceAll('/merge', '')
-        .replaceAll('/head', '')}`;
+        .replaceAll('/head', '')
+        .replaceAll('/from', '')}`;
     }
 
     return pipeline.value?.ref;

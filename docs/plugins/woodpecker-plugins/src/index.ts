@@ -4,7 +4,6 @@ import { LoadContext, Plugin, PluginContentLoadedActions } from '@docusaurus/typ
 import axios, { AxiosError } from 'axios';
 import slugify from 'slugify';
 
-
 import * as markdown from './markdown';
 import { Content, WoodpeckerPlugin, WoodpeckerPluginHeader, WoodpeckerPluginIndexEntry } from './types';
 
@@ -27,7 +26,7 @@ async function loadContent(): Promise<Content> {
             i.docs,
             axiosError.message,
             axiosError.response?.status,
-            axiosError.response?.statusText
+            axiosError.response?.statusText,
           );
           return undefined;
         }
@@ -52,10 +51,13 @@ async function loadContent(): Promise<Content> {
             const response = await axios(docsHeader.icon, {
               responseType: 'arraybuffer',
             });
-            pluginIconDataUrl = `data:${response.headers['content-type'].toString()};base64,${Buffer.from(
-              response.data,
-              'binary',
-            ).toString('base64')}`;
+
+            const imgType = response.headers['content-type'];
+            if (imgType) {
+              pluginIconDataUrl = `data:${imgType.toString()};base64,${Buffer.from(response.data, 'binary').toString(
+                'base64',
+              )}`;
+            }
           } catch (e) {
             console.error("Can't fetch plugin icon", docsHeader.icon, (e as AxiosError).message);
           }

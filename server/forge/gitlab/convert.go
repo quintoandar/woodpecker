@@ -21,15 +21,41 @@ import (
 	"net/http"
 	"strings"
 
-	gitlab "gitlab.com/gitlab-org/api/client-go"
+	gitlab "gitlab.com/gitlab-org/api/client-go/v2"
 
+	"go.woodpecker-ci.org/woodpecker/v3/server/forge/common"
+	"go.woodpecker-ci.org/woodpecker/v3/server/forge/types"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/utils"
 )
 
 const (
-	mergeRefs               = "refs/merge-requests/%d/head" // merge request merged with base
-	VisibilityLevelInternal = 10
+	mergeRefs = "refs/merge-requests/%d/head" // merge request merged with base
+
+	// GitLab project visibility_level values, as sent in webhook payloads.
+	// See https://docs.gitlab.com/api/projects/#project-visibility-level.
+	visibilityLevelPrivate  = 0
+	visibilityLevelInternal = 10
+	visibilityLevelPublic   = 20
+
+	stateOpened = "opened"
+
+	actionOpen   = "open"
+	actionClose  = "close"
+	actionReopen = "reopen"
+	actionMerge  = "merge"
+	actionUpdate = "update"
+
+	metadataReasonAssigned          = "assigned"
+	metadataReasonUnassigned        = "unassigned"
+	metadataReasonMilestoned        = "milestoned"
+	metadataReasonDemilestoned      = "demilestoned"
+	metadataReasonTitleEdited       = "title_edited"
+	metadataReasonDescriptionEdited = "description_edited"
+	metadataReasonLabelsAdded       = "labels_added"
+	metadataReasonLabelsCleared     = "labels_cleared"
+	metadataReasonLabelsUpdated     = "labels_updated"
+	metadataReasonReviewRequested   = "review_requested"
 )
 
 func (g *GitLab) convertGitLabRepo(_repo *gitlab.Project, projectMember *gitlab.ProjectMember) (*model.Repo, error) {
@@ -63,27 +89,102 @@ func (g *GitLab) convertGitLabRepo(_repo *gitlab.Project, projectMember *gitlab.
 	return repo, nil
 }
 
-func convertMergeRequestHook(hook *gitlab.MergeEvent, req *http.Request) (int, *model.Repo, *model.Pipeline, error) {
-	repo := &model.Repo{}
-	pipeline := &model.Pipeline{}
+func convertMergeRequestHook(hook *gitlab.MergeEvent, req *http.Request) (mergeID, milestoneID int64, repo *model.Repo, pipeline *model.Pipeline, err error) {
+	repo = &model.Repo{}
+	pipeline = &model.Pipeline{}
 
 	target := hook.ObjectAttributes.Target
 	source := hook.ObjectAttributes.Source
 	obj := hook.ObjectAttributes
 
+	switch obj.Action {
+	case actionClose, actionMerge:
+		// pull close event
+		pipeline.Event = model.EventPullClosed
+
+	case actionOpen, actionReopen:
+		// pull open event -> pull event
+		pipeline.Event = model.EventPull
+
+	case actionUpdate:
+		if obj.OldRev != "" && obj.State == stateOpened {
+			// if some git action happened then OldRev != "" -> it's a normal pull_request trigger
+			// https://github.com/woodpecker-ci/woodpecker/pull/3338
+			// https://docs.gitlab.com/ee/user/project/integrations/webhook_events.html#merge-request-events
+			pipeline.Event = model.EventPull
+			break
+		}
+
+		pipeline.Event = model.EventPullMetadata
+		// All changes are just update actions ... so we have to look into the changes section
+		var reason []string
+		if len(hook.Changes.Assignees.Current) != 0 {
+			reason = append(reason, metadataReasonAssigned)
+		}
+		if len(hook.Changes.Assignees.Previous) != 0 {
+			reason = append(reason, metadataReasonUnassigned)
+		}
+
+		if hook.Changes.MilestoneID.Current != 0 {
+			reason = append(reason, metadataReasonMilestoned)
+		}
+		if hook.Changes.MilestoneID.Previous != 0 {
+			reason = append(reason, metadataReasonDemilestoned)
+		}
+
+		if len(hook.Changes.Title.Current) != 0 || len(hook.Changes.Title.Previous) != 0 {
+			reason = append(reason, metadataReasonTitleEdited)
+		}
+
+		if len(hook.Changes.Description.Current) != 0 || len(hook.Changes.Description.Previous) != 0 {
+			reason = append(reason, metadataReasonDescriptionEdited)
+		}
+
+		switch {
+		case len(hook.Changes.Labels.Current) != 0 && len(hook.Changes.Labels.Previous) == 0:
+			reason = append(reason, metadataReasonLabelsAdded)
+		case len(hook.Changes.Labels.Current) == 0 && len(hook.Changes.Labels.Previous) != 0:
+			reason = append(reason, metadataReasonLabelsCleared)
+		case len(hook.Changes.Labels.Current) != 0 && len(hook.Changes.Labels.Previous) != 0:
+			reason = append(reason, metadataReasonLabelsUpdated)
+		}
+
+		if len(hook.Changes.Reviewers.Current) > len(hook.Changes.Reviewers.Previous) {
+			reason = append(reason, metadataReasonReviewRequested)
+		}
+
+		for i := range reason {
+			reason[i] = common.NormalizeEventReason(reason[i])
+		}
+
+		pipeline.EventReason = reason
+		if len(pipeline.EventReason) == 0 {
+			return 0, 0, nil, nil, &types.ErrIgnoreEvent{
+				Event:  "Merge Request Hook",
+				Reason: fmt.Sprintf("Action '%s' no supported changes detected", obj.Action),
+			}
+		}
+	default:
+		// non supported action
+		return 0, 0, nil, nil, &types.ErrIgnoreEvent{
+			Event:  "Merge Request Hook",
+			Reason: fmt.Sprintf("Action '%s' not supported", obj.Action),
+		}
+	}
+
 	switch {
 	case target == nil && source == nil:
-		return 0, nil, nil, fmt.Errorf("target and source keys expected in merge request hook")
+		return 0, 0, nil, nil, fmt.Errorf("target and source keys expected in merge request hook")
 	case target == nil:
-		return 0, nil, nil, fmt.Errorf("target key expected in merge request hook")
+		return 0, 0, nil, nil, fmt.Errorf("target key expected in merge request hook")
 	case source == nil:
-		return 0, nil, nil, fmt.Errorf("source key expected in merge request hook")
+		return 0, 0, nil, nil, fmt.Errorf("source key expected in merge request hook")
 	}
 
 	if target.PathWithNamespace != "" {
 		var err error
 		if repo.Owner, repo.Name, err = extractFromPath(target.PathWithNamespace); err != nil {
-			return 0, nil, nil, err
+			return 0, 0, nil, nil, err
 		}
 		repo.FullName = target.PathWithNamespace
 	} else {
@@ -112,11 +213,6 @@ func convertMergeRequestHook(hook *gitlab.MergeEvent, req *http.Request) (int, *
 		repo.Avatar = target.AvatarURL
 	}
 
-	pipeline.Event = model.EventPull
-	if obj.State == "closed" || obj.State == "merged" {
-		pipeline.Event = model.EventPullClosed
-	}
-
 	lastCommit := obj.LastCommit
 
 	pipeline.Message = lastCommit.Message
@@ -128,7 +224,7 @@ func convertMergeRequestHook(hook *gitlab.MergeEvent, req *http.Request) (int, *
 
 	author := lastCommit.Author
 
-	pipeline.Author = author.Name
+	pipeline.Author = hook.User.Username
 	pipeline.Email = author.Email
 
 	if len(pipeline.Email) != 0 {
@@ -141,7 +237,7 @@ func convertMergeRequestHook(hook *gitlab.MergeEvent, req *http.Request) (int, *
 	pipeline.PullRequestDraft = obj.Draft || obj.WorkInProgress
 	pipeline.FromFork = target.PathWithNamespace != source.PathWithNamespace
 
-	return obj.IID, repo, pipeline, nil
+	return obj.IID, hook.ObjectAttributes.MilestoneID, repo, pipeline, nil
 }
 
 func convertPushHook(hook *gitlab.PushEvent) (*model.Repo, *model.Pipeline, error) {
@@ -161,12 +257,21 @@ func convertPushHook(hook *gitlab.PushEvent) (*model.Repo, *model.Pipeline, erro
 	repo.FullName = hook.Project.PathWithNamespace
 	repo.Branch = hook.Project.DefaultBranch
 
+	// GitLab does not send `project.visibility` (string) in push event
+	// payloads — only `project.visibility_level` (numeric), which the
+	// go-gitlab library does not expose on PushEventProject. So this switch
+	// is a no-op for real-world payloads, leaving Visibility/IsSCMPrivate
+	// at zero values. model.Repo.Update() must therefore guard against
+	// overwriting the value previously synced via the forge API.
 	switch hook.Project.Visibility {
 	case gitlab.PrivateVisibility:
+		repo.Visibility = model.VisibilityPrivate
 		repo.IsSCMPrivate = true
 	case gitlab.InternalVisibility:
+		repo.Visibility = model.VisibilityInternal
 		repo.IsSCMPrivate = true
 	case gitlab.PublicVisibility:
+		repo.Visibility = model.VisibilityPublic
 		repo.IsSCMPrivate = false
 	}
 
@@ -175,11 +280,12 @@ func convertPushHook(hook *gitlab.PushEvent) (*model.Repo, *model.Pipeline, erro
 	pipeline.Branch = strings.TrimPrefix(hook.Ref, "refs/heads/")
 	pipeline.Ref = hook.Ref
 
+	pipeline.Author = hook.UserUsername
+
 	// assume a capacity of 4 changed files per commit
 	files := make([]string, 0, len(hook.Commits)*4)
 	for _, cm := range hook.Commits {
 		if hook.After == cm.ID {
-			pipeline.Author = cm.Author.Name
 			pipeline.Email = cm.Author.Email
 			pipeline.Message = cm.Message
 			pipeline.Timestamp = cm.Timestamp.Unix()
@@ -197,13 +303,13 @@ func convertPushHook(hook *gitlab.PushEvent) (*model.Repo, *model.Pipeline, erro
 	return repo, pipeline, nil
 }
 
-func convertTagHook(hook *gitlab.TagEvent) (*model.Repo, *model.Pipeline, error) {
+func convertTagHook(hook *gitlab.TagEvent) (*model.Repo, *model.Pipeline, string, error) {
 	repo := &model.Repo{}
 	pipeline := &model.Pipeline{}
 
 	var err error
 	if repo.Owner, repo.Name, err = extractFromPath(hook.Project.PathWithNamespace); err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 
 	repo.ForgeRemoteID = model.ForgeRemoteID(fmt.Sprint(hook.ProjectID))
@@ -214,23 +320,29 @@ func convertTagHook(hook *gitlab.TagEvent) (*model.Repo, *model.Pipeline, error)
 	repo.FullName = hook.Project.PathWithNamespace
 	repo.Branch = hook.Project.DefaultBranch
 
+	// See note in convertPushHook: tag event payloads also omit
+	// `project.visibility`, so this switch typically does nothing.
 	switch hook.Project.Visibility {
 	case gitlab.PrivateVisibility:
+		repo.Visibility = model.VisibilityPrivate
 		repo.IsSCMPrivate = true
 	case gitlab.InternalVisibility:
+		repo.Visibility = model.VisibilityInternal
 		repo.IsSCMPrivate = true
 	case gitlab.PublicVisibility:
+		repo.Visibility = model.VisibilityPublic
 		repo.IsSCMPrivate = false
 	}
 
+	refTag := strings.TrimPrefix(hook.Ref, "refs/heads/")
 	pipeline.Event = model.EventTag
 	pipeline.Commit = hook.After
-	pipeline.Branch = strings.TrimPrefix(hook.Ref, "refs/heads/")
+	pipeline.Branch = refTag
 	pipeline.Ref = hook.Ref
+	pipeline.Author = hook.UserUsername
 
 	for _, cm := range hook.Commits {
 		if hook.After == cm.ID {
-			pipeline.Author = cm.Author.Name
 			pipeline.Email = cm.Author.Email
 			pipeline.Message = cm.Message
 			pipeline.Timestamp = cm.Timestamp.Unix()
@@ -241,7 +353,7 @@ func convertTagHook(hook *gitlab.TagEvent) (*model.Repo, *model.Pipeline, error)
 		}
 	}
 
-	return repo, pipeline, nil
+	return repo, pipeline, hook.After, nil
 }
 
 func convertReleaseHook(hook *gitlab.ReleaseEvent) (*model.Repo, *model.Pipeline, error) {
@@ -262,7 +374,21 @@ func convertReleaseHook(hook *gitlab.ReleaseEvent) (*model.Repo, *model.Pipeline
 	repo.CloneSSH = hook.Project.GitSSHURL
 	repo.FullName = hook.Project.PathWithNamespace
 	repo.Branch = hook.Project.DefaultBranch
-	repo.IsSCMPrivate = hook.Project.VisibilityLevel > VisibilityLevelInternal
+
+	// Release events expose visibility as a numeric level (unlike push/tag
+	// which omit it from the payload entirely). Map it to both Visibility
+	// and IsSCMPrivate so model.Repo.Update() will propagate the value.
+	switch hook.Project.VisibilityLevel {
+	case visibilityLevelPrivate:
+		repo.Visibility = model.VisibilityPrivate
+		repo.IsSCMPrivate = true
+	case visibilityLevelInternal:
+		repo.Visibility = model.VisibilityInternal
+		repo.IsSCMPrivate = true
+	case visibilityLevelPublic:
+		repo.Visibility = model.VisibilityPublic
+		repo.IsSCMPrivate = false
+	}
 
 	pipeline := &model.Pipeline{
 		Event:    model.EventRelease,
@@ -270,8 +396,11 @@ func convertReleaseHook(hook *gitlab.ReleaseEvent) (*model.Repo, *model.Pipeline
 		ForgeURL: hook.URL,
 		Message:  fmt.Sprintf("created release %s", hook.Name),
 		Sender:   hook.Commit.Author.Name,
-		Author:   hook.Commit.Author.Name,
-		Email:    hook.Commit.Author.Email,
+		// Using the commit author here as Gitlab does not send the hook user.
+		// This is not an issue because releases can be created by users with
+		// push permissions only anyways.
+		Author: hook.Commit.Author.Name,
+		Email:  hook.Commit.Author.Email,
 
 		// Tag name here is the ref. We should add the refs/tags, so
 		// it is known it's a tag (git-plugin looks for it)

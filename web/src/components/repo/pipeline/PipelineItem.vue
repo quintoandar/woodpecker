@@ -28,12 +28,12 @@
         <span class="md:display-unset text-wp-text-alt-100 hidden">#{{ pipeline.number }}</span>
         <!-- eslint-disable-next-line @intlify/vue-i18n/no-raw-text -->
         <span class="md:display-unset text-wp-text-alt-100 mx-2 hidden">-</span>
-        <span
+        <RenderMarkdown
           class="text-wp-text-100 overflow-hidden text-ellipsis whitespace-nowrap underline md:no-underline"
           :title="message"
-        >
-          {{ shortMessage }}
-        </span>
+          :content="shortMessage"
+          inline
+        />
       </div>
 
       <div
@@ -43,6 +43,7 @@
           <span :title="pipelineEventTitle">
             <Icon v-if="pipeline.event === 'pull_request'" name="pull-request" />
             <Icon v-else-if="pipeline.event === 'pull_request_closed'" name="pull-request-closed" />
+            <Icon v-else-if="pipeline.event === 'pull_request_metadata'" name="pull-request-metadata" />
             <Icon v-else-if="pipeline.event === 'deployment'" name="deployment" />
             <Icon v-else-if="pipeline.event === 'tag' || pipeline.event === 'release'" name="tag" />
             <Icon v-else-if="pipeline.event === 'cron'" name="branch" />
@@ -82,6 +83,7 @@ import { useI18n } from 'vue-i18n';
 
 import Icon from '~/components/atomic/Icon.vue';
 import ListItem from '~/components/atomic/ListItem.vue';
+import RenderMarkdown from '~/components/atomic/RenderMarkdown.vue';
 import { pipelineStatusColors } from '~/components/repo/pipeline/pipeline-status';
 import PipelineRunningIcon from '~/components/repo/pipeline/PipelineRunningIcon.vue';
 import PipelineStatusIcon from '~/components/repo/pipeline/PipelineStatusIcon.vue';
@@ -105,6 +107,8 @@ const pipelineEventTitle = computed(() => {
       return t('repo.pipeline.event.pr');
     case 'pull_request_closed':
       return t('repo.pipeline.event.pr_closed');
+    case 'pull_request_metadata':
+      return t('repo.pipeline.event.pr_metadata');
     case 'deployment':
       return t('repo.pipeline.event.deploy');
     case 'tag':

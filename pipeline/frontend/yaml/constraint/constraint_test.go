@@ -18,417 +18,45 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"gopkg.in/yaml.v3"
+	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v4"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/metadata"
 )
 
-func TestConstraint(t *testing.T) {
+func TestConstraintStatusSuccessFailure(t *testing.T) {
 	testdata := []struct {
-		conf string
-		with string
-		want bool
+		conf        string
+		wantSuccess bool
+		wantFail    bool
 	}{
-		// string value
-		{
-			conf: "main",
-			with: "develop",
-			want: false,
-		},
-		{
-			conf: "main",
-			with: "main",
-			want: true,
-		},
-		{
-			conf: "feature/*",
-			with: "feature/foo",
-			want: true,
-		},
-		// slice value
-		{
-			conf: "[ main, feature/* ]",
-			with: "develop",
-			want: false,
-		},
-		{
-			conf: "[ main, feature/* ]",
-			with: "main",
-			want: true,
-		},
-		{
-			conf: "[ main, feature/* ]",
-			with: "feature/foo",
-			want: true,
-		},
-		// includes block
-		{
-			conf: "include: main",
-			with: "develop",
-			want: false,
-		},
-		{
-			conf: "include: main",
-			with: "main",
-			want: true,
-		},
-		{
-			conf: "include: feature/*",
-			with: "main",
-			want: false,
-		},
-		{
-			conf: "include: feature/*",
-			with: "feature/foo",
-			want: true,
-		},
-		{
-			conf: "include: [ main, feature/* ]",
-			with: "develop",
-			want: false,
-		},
-		{
-			conf: "include: [ main, feature/* ]",
-			with: "main",
-			want: true,
-		},
-		{
-			conf: "include: [ main, feature/* ]",
-			with: "feature/foo",
-			want: true,
-		},
-		// excludes block
-		{
-			conf: "exclude: main",
-			with: "develop",
-			want: true,
-		},
-		{
-			conf: "exclude: main",
-			with: "main",
-			want: false,
-		},
-		{
-			conf: "exclude: feature/*",
-			with: "main",
-			want: true,
-		},
-		{
-			conf: "exclude: feature/*",
-			with: "feature/foo",
-			want: false,
-		},
-		{
-			conf: "exclude: [ main, develop ]",
-			with: "main",
-			want: false,
-		},
-		{
-			conf: "exclude: [ feature/*, bar ]",
-			with: "main",
-			want: true,
-		},
-		{
-			conf: "exclude: [ feature/*, bar ]",
-			with: "feature/foo",
-			want: false,
-		},
-		// include and exclude blocks
-		{
-			conf: "{ include: [ main, feature/* ], exclude: [ develop ] }",
-			with: "main",
-			want: true,
-		},
-		{
-			conf: "{ include: [ main, feature/* ], exclude: [ feature/bar ] }",
-			with: "feature/bar",
-			want: false,
-		},
-		{
-			conf: "{ include: [ main, feature/* ], exclude: [ main, develop ] }",
-			with: "main",
-			want: false,
-		},
-		// empty blocks
-		{
-			conf: "",
-			with: "main",
-			want: true,
-		},
+		{conf: "", wantSuccess: true, wantFail: false},
+		{conf: "{status: [failure]}", wantSuccess: false, wantFail: true},
+		{conf: "{status: [success]}", wantSuccess: true, wantFail: false},
+		{conf: "{status: [failure, success]}", wantSuccess: true, wantFail: true},
+		{conf: "{event: push, status: [failure, success]}", wantSuccess: false, wantFail: false},
+		{conf: "{event: pull_request, status: [failure, success]}", wantSuccess: true, wantFail: true},
+		{conf: "{event: push, status: failure}", wantSuccess: false, wantFail: false},
+		{conf: "{event: pull_request, status: [failure]}", wantSuccess: false, wantFail: true},
+		{conf: "{status: success}", wantSuccess: true, wantFail: false},
+		{conf: "[{}]", wantSuccess: true, wantFail: false},
+		{conf: "[{status: success}]", wantSuccess: true, wantFail: false},
+		{conf: "[{},{status: failure}]", wantSuccess: true, wantFail: true},
+		{conf: "[{event: push, status: success},{status: failure}]", wantSuccess: false, wantFail: true},
+		{conf: "[{status: failure},{event: push, status: success}]", wantSuccess: false, wantFail: true},
 	}
 	for _, test := range testdata {
-		c := parseConstraint(t, test.conf)
-		assert.Equal(t, test.want, c.Match(test.with))
-	}
-}
-
-func TestConstraintList(t *testing.T) {
-	testdata := []struct {
-		conf    string
-		with    []string
-		message string
-		want    bool
-	}{
-		{
-			conf: "",
-			with: []string{"CHANGELOG.md", "README.md"},
-			want: true,
-		},
-		{
-			conf: "CHANGELOG.md",
-			with: []string{"CHANGELOG.md", "README.md"},
-			want: true,
-		},
-		{
-			conf: "'*.md'",
-			with: []string{"CHANGELOG.md", "README.md"},
-			want: true,
-		},
-		{
-			conf: "['*.md']",
-			with: []string{"CHANGELOG.md", "README.md"},
-			want: true,
-		},
-		{
-			conf: "'docs/*'",
-			with: []string{"docs/README.md"},
-			want: true,
-		},
-		{
-			conf: "'docs/*'",
-			with: []string{"docs/sub/README.md"},
-			want: false,
-		},
-		{
-			conf: "'docs/**'",
-			with: []string{"docs/README.md", "docs/sub/README.md", "docs/sub-sub/README.md"},
-			want: true,
-		},
-		{
-			conf: "'docs/**'",
-			with: []string{"README.md"},
-			want: false,
-		},
-		{
-			conf: "{ include: [ README.md ] }",
-			with: []string{"CHANGELOG.md"},
-			want: false,
-		},
-		{
-			conf: "{ exclude: [ README.md ] }",
-			with: []string{"design.md"},
-			want: true,
-		},
-		// include and exclude blocks
-		{
-			conf: "{ include: [ '*.md', '*.ini' ], exclude: [ CHANGELOG.md ] }",
-			with: []string{"README.md"},
-			want: true,
-		},
-		{
-			conf: "{ include: [ '*.md' ], exclude: [ CHANGELOG.md ] }",
-			with: []string{"CHANGELOG.md"},
-			want: false,
-		},
-		{
-			conf: "{ include: [ '*.md' ], exclude: [ CHANGELOG.md ] }",
-			with: []string{"README.md", "CHANGELOG.md"},
-			want: true,
-		},
-		{
-			conf: "{ exclude: [ CHANGELOG.md ] }",
-			with: []string{"README.md", "CHANGELOG.md"},
-			want: true,
-		},
-		{
-			conf: "{ exclude: [ CHANGELOG.md, docs/**/*.md ] }",
-			with: []string{"docs/main.md", "CHANGELOG.md"},
-			want: false,
-		},
-		{
-			conf: "{ exclude: [ CHANGELOG.md, docs/**/*.md ] }",
-			with: []string{"docs/main.md", "CHANGELOG.md", "README.md"},
-			want: true,
-		},
-		// commit message ignore matches
-		{
-			conf:    "{ include: [ README.md ], ignore_message: '[ALL]' }",
-			with:    []string{"CHANGELOG.md"},
-			message: "Build them [ALL]",
-			want:    true,
-		},
-		{
-			conf:    "{ exclude: [ '*.php' ], ignore_message: '[ALL]' }",
-			with:    []string{"myfile.php"},
-			message: "Build them [ALL]",
-			want:    true,
-		},
-		{
-			conf:    "{ ignore_message: '[ALL]' }",
-			with:    []string{},
-			message: "Build them [ALL]",
-			want:    true,
-		},
-		// empty commit
-		{
-			conf: "{ include: [ README.md ] }",
-			with: []string{},
-			want: true,
-		},
-		{
-			conf: "{ include: [ README.md ], on_empty: false }",
-			with: []string{},
-			want: false,
-		},
-		{
-			conf: "{ include: [ README.md ], on_empty: true }",
-			with: []string{},
-			want: true,
-		},
-	}
-	for _, test := range testdata {
-		c := parseConstraintPath(t, test.conf)
-		assert.Equal(t, test.want, c.Match(test.with, test.message))
-	}
-}
-
-func TestConstraintMap(t *testing.T) {
-	testdata := []struct {
-		conf string
-		with map[string]string
-		want bool
-	}{
-		{
-			conf: "GOLANG: 1.7",
-			with: map[string]string{"GOLANG": "1.7"},
-			want: true,
-		},
-		{
-			conf: "GOLANG: tip",
-			with: map[string]string{"GOLANG": "1.7"},
-			want: false,
-		},
-		{
-			conf: "{ GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.1", "MYSQL": "5.6"},
-			want: true,
-		},
-		{
-			conf: "{ GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.0"},
-			want: false,
-		},
-		{
-			conf: "{ GOLANG: 1.7, REDIS: 3.* }",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.0"},
-			want: true,
-		},
-		{
-			conf: "{ GOLANG: 1.7, BRANCH: release/**/test }",
-			with: map[string]string{"GOLANG": "1.7", "BRANCH": "release/v1.12.1//test"},
-			want: true,
-		},
-		{
-			conf: "{ GOLANG: 1.7, BRANCH: release/**/test }",
-			with: map[string]string{"GOLANG": "1.7", "BRANCH": "release/v1.12.1/qest"},
-			want: false,
-		},
-		// include syntax
-		{
-			conf: "include: { GOLANG: 1.7 }",
-			with: map[string]string{"GOLANG": "1.7"},
-			want: true,
-		},
-		{
-			conf: "include: { GOLANG: tip }",
-			with: map[string]string{"GOLANG": "1.7"},
-			want: false,
-		},
-		{
-			conf: "include: { GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.1", "MYSQL": "5.6"},
-			want: true,
-		},
-		{
-			conf: "include: { GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.0"},
-			want: false,
-		},
-		// exclude syntax
-		{
-			conf: "exclude: { GOLANG: 1.7 }",
-			with: map[string]string{"GOLANG": "1.7"},
-			want: false,
-		},
-		{
-			conf: "exclude: { GOLANG: tip }",
-			with: map[string]string{"GOLANG": "1.7"},
-			want: true,
-		},
-		{
-			conf: "exclude: { GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.1", "MYSQL": "5.6"},
-			want: false,
-		},
-		{
-			conf: "exclude: { GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.0"},
-			want: true,
-		},
-		// exclude AND include values
-		{
-			conf: "{ include: { GOLANG: 1.7 }, exclude: { GOLANG: 1.7 } }",
-			with: map[string]string{"GOLANG": "1.7"},
-			want: false,
-		},
-		// blanks
-		{
-			conf: "",
-			with: map[string]string{"GOLANG": "1.7", "REDIS": "3.0"},
-			want: true,
-		},
-		{
-			conf: "GOLANG: 1.7",
-			with: map[string]string{},
-			want: false,
-		},
-		{
-			conf: "{ GOLANG: 1.7, REDIS: 3.0 }",
-			with: map[string]string{},
-			want: false,
-		},
-		{
-			conf: "include: { GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{},
-			want: false,
-		},
-		{
-			conf: "exclude: { GOLANG: 1.7, REDIS: 3.1 }",
-			with: map[string]string{},
-			want: true,
-		},
-	}
-	for _, test := range testdata {
-		c := parseConstraintMap(t, test.conf)
-		assert.Equal(t, test.want, c.Match(test.with), "config: '%s', with: '%s'", test.conf, test.with)
-	}
-}
-
-func TestConstraintStatusSuccess(t *testing.T) {
-	testdata := []struct {
-		conf string
-		want bool
-	}{
-		{conf: "", want: true},
-		{conf: "{status: [failure]}", want: false},
-		{conf: "{status: [success]}", want: true},
-		{conf: "{status: [failure, success]}", want: true},
-		{conf: "{status: {exclude: [success], include: [failure]}}", want: false},
-		{conf: "{status: {exclude: [failure], include: [success]}}", want: true},
-	}
-	for _, test := range testdata {
-		c := parseConstraints(t, test.conf)
-		assert.Equal(t, test.want, c.IncludesStatusSuccess(), "when: '%s'", test.conf)
+		t.Run(test.conf, func(t *testing.T) {
+			c := parseConstraints(t, test.conf)
+			assert.Equalf(t,
+				test.wantSuccess,
+				c.IncludesStatusSuccess(metadata.Metadata{Curr: metadata.Pipeline{Event: metadata.EventPull}}, true, map[string]string{}),
+				"include success is wrong for when: '%s'", test.conf)
+			assert.Equal(t,
+				test.wantFail,
+				c.IncludesStatusFailure(metadata.Metadata{Curr: metadata.Pipeline{Event: metadata.EventPull}}, true, map[string]string{}),
+				"include fail is wrong for when: '%s'", test.conf)
+		})
 	}
 }
 
@@ -572,25 +200,8 @@ func TestConstraints(t *testing.T) {
 }
 
 func parseConstraints(t *testing.T, s string) *When {
+	t.Helper()
 	c := &When{}
-	assert.NoError(t, yaml.Unmarshal([]byte(s), c))
-	return c
-}
-
-func parseConstraint(t *testing.T, s string) *List {
-	c := &List{}
-	assert.NoError(t, yaml.Unmarshal([]byte(s), c))
-	return c
-}
-
-func parseConstraintMap(t *testing.T, s string) *Map {
-	c := &Map{}
-	assert.NoError(t, yaml.Unmarshal([]byte(s), c))
-	return c
-}
-
-func parseConstraintPath(t *testing.T, s string) *Path {
-	c := &Path{}
-	assert.NoError(t, yaml.Unmarshal([]byte(s), c))
+	require.NoError(t, yaml.Unmarshal([]byte(s), c))
 	return c
 }

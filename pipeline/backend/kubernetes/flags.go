@@ -91,6 +91,18 @@ var Flags = []cli.Flag{
 		Usage:   "whether to allow using tolerations from step's backend options",
 		Value:   true,
 	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_POD_AFFINITY"),
+		Name:    "backend-k8s-pod-affinity",
+		Usage:   "backend k8s Agent-wide worker pod affinity, in YAML format",
+		Value:   "",
+	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_POD_AFFINITY_ALLOW_FROM_STEP"),
+		Name:    "backend-k8s-pod-affinity-allow-from-step",
+		Usage:   "whether to allow using affinity from step's backend options",
+		Value:   false,
+	},
 	&cli.BoolFlag{
 		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_SECCTX_NONROOT"), // cspell:words secctx nonroot
 		Name:    "backend-k8s-secctx-nonroot",
@@ -100,6 +112,9 @@ var Flags = []cli.Flag{
 		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_PULL_SECRET_NAMES"),
 		Name:    "backend-k8s-pod-image-pull-secret-names",
 		Usage:   "backend k8s pull secret names for private registries",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.BoolFlag{
 		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_ALLOW_NATIVE_SECRETS"),
@@ -107,10 +122,28 @@ var Flags = []cli.Flag{
 		Usage:   "whether to allow existing Kubernetes secrets to be referenced from steps",
 		Value:   false,
 	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_SERVICE_ACCOUNT_NAME_ALLOW_FROM_STEP"),
+		Name:    "backend-k8s-service-account-name-allow-from-step",
+		Usage:   "whether to allow using service account name from step's backend options",
+		Value:   false,
+	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_PRIORITY_CLASS"),
 		Name:    "backend-k8s-priority-class",
 		Usage:   "which kubernetes priority class to assign to created job pods",
 		Value:   "",
+	},
+	&cli.Int64Flag{
+		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_STOP_TIMEOUT"),
+		Name:    "backend-k8s-stop-timeout",
+		Usage:   "seconds Woodpecker waits for pods to stop gracefully before forcefully killing them",
+		Value:   20,
+	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_PERMISSION_INIT_IMAGE"),
+		Name:    "backend-k8s-permission-init-image",
+		Usage:   "image used by the workspace permission init container",
+		Value:   "busybox:stable-musl",
 	},
 }

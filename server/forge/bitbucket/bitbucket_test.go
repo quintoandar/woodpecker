@@ -30,11 +30,11 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/server/forge/types"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 	"go.woodpecker-ci.org/woodpecker/v3/server/store"
-	mocks_store "go.woodpecker-ci.org/woodpecker/v3/server/store/mocks"
+	store_mocks "go.woodpecker-ci.org/woodpecker/v3/server/store/mocks"
 )
 
 func TestNew(t *testing.T) {
-	forge, _ := New(&Opts{OAuthClientID: "4vyW6b49Z", OAuthClientSecret: "a5012f6c6"})
+	forge, _ := New(1, &Opts{OAuthClientID: "4vyW6b49Z", OAuthClientSecret: "a5012f6c6"})
 
 	f, _ := forge.(*config)
 	assert.Equal(t, DefaultURL, f.url)
@@ -52,7 +52,7 @@ func TestBitbucket(t *testing.T) {
 
 	ctx := t.Context()
 
-	forge, _ := New(&Opts{})
+	forge, _ := New(1, &Opts{})
 	netrc, _ := forge.Netrc(fakeUser, fakeRepo)
 	assert.Equal(t, "bitbucket.org", netrc.Machine)
 	assert.Equal(t, "x-token-auth", netrc.Login)
@@ -81,13 +81,6 @@ func TestBitbucket(t *testing.T) {
 	})
 	assert.Error(t, err)
 
-	login, err := c.Auth(ctx, fakeUser.AccessToken, fakeUser.RefreshToken)
-	assert.NoError(t, err)
-	assert.Equal(t, fakeUser.Login, login)
-
-	_, err = c.Auth(ctx, fakeUserNotFound.AccessToken, fakeUserNotFound.RefreshToken)
-	assert.Error(t, err)
-
 	ok, err := c.Refresh(ctx, fakeUserRefresh)
 	assert.NoError(t, err)
 	assert.True(t, ok)
@@ -109,22 +102,23 @@ func TestBitbucket(t *testing.T) {
 	_, err = c.Repo(ctx, fakeUser, "", fakeRepoNotFound.Owner, fakeRepoNotFound.Name)
 	assert.Error(t, err)
 
-	repos, err := c.Repos(ctx, fakeUser)
+	repos, err := c.Repos(ctx, fakeUser, &model.ListOptions{Page: 1, PerPage: 10})
 	assert.NoError(t, err)
+	assert.Len(t, repos, 1)
 	assert.Equal(t, fakeRepo.FullName, repos[0].FullName)
 
-	_, err = c.Repos(ctx, fakeUserNoTeams)
+	_, err = c.Repos(ctx, fakeUserNoTeams, &model.ListOptions{Page: 1, PerPage: 10})
 	assert.Error(t, err)
 
-	_, err = c.Repos(ctx, fakeUserNoRepos)
+	_, err = c.Repos(ctx, fakeUserNoRepos, &model.ListOptions{Page: 1, PerPage: 10})
 	assert.Error(t, err)
 
-	teams, err := c.Teams(ctx, fakeUser)
+	teams, err := c.Teams(ctx, fakeUser, &model.ListOptions{Page: 1, PerPage: 10})
 	assert.NoError(t, err)
-	assert.Equal(t, "ueberdev42", teams[0].Login)
+	assert.Equal(t, "test_name", teams[0].Login)
 	assert.Equal(t, "https://bitbucket.org/workspaces/ueberdev42/avatar/?ts=1658761964", teams[0].Avatar)
 
-	_, err = c.Teams(ctx, fakeUserNoTeams)
+	_, err = c.Teams(ctx, fakeUserNoTeams, &model.ListOptions{Page: 1, PerPage: 10})
 	assert.Error(t, err)
 
 	raw, err := c.File(ctx, fakeUser, fakeRepo, fakePipeline, "file")
@@ -206,16 +200,17 @@ func TestBitbucket(t *testing.T) {
 	req.Header = http.Header{}
 	req.Header.Set(hookEvent, hookPush)
 
-	mockStore := mocks_store.NewStore(t)
+	mockStore := store_mocks.NewMockStore(t)
 	ctx = store.InjectToContext(ctx, mockStore)
 	mockStore.On("GetUser", mock.Anything).Return(fakeUser, nil)
-	mockStore.On("GetRepoForgeID", mock.Anything).Return(fakeRepoFromHook, nil)
+	mockStore.On("GetRepoForgeID", mock.Anything, mock.Anything).Return(fakeRepoFromHook, nil)
 
 	r, b, err := c.Hook(ctx, req)
 	assert.NoError(t, err)
 	assert.Equal(t, "martinherren1984/publictestrepo", r.FullName)
 	assert.Equal(t, "master", r.Branch)
 	assert.Equal(t, "c14c1bb05dfb1fdcdf06b31485fff61b0ea44277", b.Commit)
+	assert.Equal(t, []string{"main.go"}, b.ChangedFiles)
 }
 
 var (
@@ -237,11 +232,6 @@ var (
 	fakeUserRefreshEmpty = &model.User{
 		Login:        "superman",
 		RefreshToken: "refresh_token_is_empty",
-	}
-
-	fakeUserNotFound = &model.User{
-		Login:       "superman",
-		AccessToken: "user_not_found",
 	}
 
 	fakeUserNoTeams = &model.User{

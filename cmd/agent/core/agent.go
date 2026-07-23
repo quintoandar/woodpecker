@@ -17,7 +17,6 @@ package core
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"maps"
@@ -30,11 +29,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/sync/errgroup"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	grpc_credentials "google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -43,7 +38,7 @@ import (
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
-	"go.woodpecker-ci.org/woodpecker/v3/pipeline/rpc"
+	"go.woodpecker-ci.org/woodpecker/v3/rpc"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/logger"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/utils"
 	"go.woodpecker-ci.org/woodpecker/v3/version"
@@ -54,31 +49,14 @@ const (
 	authInterceptorRefreshInterval = time.Minute * 30
 )
 
-const (
-	shutdownTimeout = time.Second * 5
-)
-
-var (
-	stopAgentFunc      context.CancelCauseFunc = func(error) {}
-	shutdownCancelFunc context.CancelFunc      = func() {}
-	shutdownCtx                                = context.Background()
-)
-
 func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
+	log.Info().Str("version", version.String()).Msg("Starting Woodpecker agent")
+
 	agentCtx, ctxCancel := context.WithCancelCause(ctx)
-	stopAgentFunc = func(err error) {
-		msg := "shutdown of whole agent"
-		if err != nil {
-			log.Error().Err(err).Msg(msg)
-		} else {
-			log.Info().Msg(msg)
-		}
-		stopAgentFunc = func(error) {}
-		shutdownCtx, shutdownCancelFunc = context.WithTimeout(shutdownCtx, shutdownTimeout)
-		ctxCancel(err)
-	}
-	defer stopAgentFunc(nil)
-	defer shutdownCancelFunc()
+	defer func() {
+		log.Info().Msg("shutdown of whole agent")
+		ctxCancel(nil)
+	}()
 
 	serviceWaitingGroup := errgroup.Group{}
 
@@ -88,7 +66,14 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 		hostname, _ = os.Hostname()
 	}
 
-	counter.Polling = c.Int("max-workflows")
+	maxWorkflows := c.Int("max-workflows")
+	singleWorkflow := c.Bool("single-workflow")
+	if singleWorkflow && maxWorkflows > 1 {
+		log.Warn().Msgf("max-workflows forced from %d to 1 due to agent running single workflow mode.", maxWorkflows)
+		maxWorkflows = 1
+	}
+
+	counter.Polling = maxWorkflows
 	counter.Running = 0
 
 	if c.Bool("healthcheck") {
@@ -98,6 +83,10 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 				go func() {
 					<-agentCtx.Done()
 					log.Info().Msg("shutdown healthcheck server ...")
+
+					shutdownCtx, shutdownCtxCancel := agent.GetShutdownContext()
+					defer shutdownCtxCancel()
+
 					if err := server.Shutdown(shutdownCtx); err != nil { //nolint:contextcheck
 						log.Error().Err(err).Msg("shutdown healthcheck server failed")
 					} else {
@@ -108,57 +97,48 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 					log.Error().Err(err).Msgf("cannot listen on address %s", c.String("healthcheck-addr"))
 				}
 				return nil
-			})
+			},
+		)
 	}
-
-	var transport grpc.DialOption
-	if c.Bool("grpc-secure") {
-		log.Trace().Msg("use ssl for grpc")
-		transport = grpc.WithTransportCredentials(grpc_credentials.NewTLS(&tls.Config{InsecureSkipVerify: c.Bool("grpc-skip-insecure")}))
-	} else {
-		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
-	}
-
-	authConn, err := grpc.NewClient(
-		c.String("server"),
-		transport,
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:    c.Duration("grpc-keepalive-time"),
-			Timeout: c.Duration("grpc-keepalive-timeout"),
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("could not create new gRPC 'channel' for authentication: %w", err)
-	}
-	defer authConn.Close()
 
 	agentConfig := readAgentConfig(agentConfigPath)
 
-	agentToken := c.String("grpc-token")
 	grpcClientCtx, grpcClientCtxCancel := context.WithCancelCause(context.Background())
 	defer grpcClientCtxCancel(nil)
-	authClient := agent_rpc.NewAuthGrpcClient(authConn, agentToken, agentConfig.AgentID)
-	authInterceptor, err := agent_rpc.NewAuthInterceptor(grpcClientCtx, authClient, authInterceptorRefreshInterval) //nolint:contextcheck
-	if err != nil {
-		return fmt.Errorf("could not create new auth interceptor: %w", err)
+
+	if c.Bool("grpc-secure") {
+		log.Trace().Msg("use ssl for grpc")
 	}
 
-	conn, err := grpc.NewClient(
-		c.String("server"),
-		transport,
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:    c.Duration("grpc-keepalive-time"),
-			Timeout: c.Duration("grpc-keepalive-timeout"),
-		}),
-		grpc.WithUnaryInterceptor(authInterceptor.Unary()),
-		grpc.WithStreamInterceptor(authInterceptor.Stream()),
+	agentConn, err := agent_rpc.Dial(grpcClientCtx, agent_rpc.DialConfig{ //nolint:contextcheck
+		ServerAddr:       c.String("server"),
+		AgentToken:       c.String("grpc-token"),
+		AgentID:          agentConfig.AgentID,
+		Secure:           c.Bool("grpc-secure"),
+		SkipTLSVerify:    c.Bool("grpc-skip-insecure"),
+		KeepaliveTime:    c.Duration("grpc-keepalive-time"),
+		KeepaliveTimeout: c.Duration("grpc-keepalive-timeout"),
+		AuthRefreshEvery: authInterceptorRefreshInterval,
+	})
+	if err != nil {
+		return err
+	}
+	defer agentConn.Close()
+
+	// Persist the agent ID received during auth so that crashloops reuse the
+	// same server-side entry instead of creating a new one on every restart.
+	if agentConfigPath != "" {
+		agentConfig.AgentID = agentConn.AgentID
+		if err := writeAgentConfig(agentConfig, agentConfigPath); err == nil {
+			log.Debug().Msgf("persisted agent ID %d after auth", agentConfig.AgentID)
+		}
+	}
+
+	client := agent_rpc.NewGrpcClient(
+		ctx, agentConn.MainConn,
+		agent_rpc.SetConnectionRetryTimeout(c.Duration("retry-timeout")),
+		agent_rpc.SetLogEntryBufferSize(c.Int("log-entry-stream-buffer-size")),
 	)
-	if err != nil {
-		return fmt.Errorf("could not create new gRPC 'channel' for normal orchestration: %w", err)
-	}
-	defer conn.Close()
-
-	client := agent_rpc.NewGrpcClient(ctx, conn)
 	agentConfigPersisted := atomic.Bool{}
 
 	grpcCtx := metadata.NewOutgoingContext(grpcClientCtx, metadata.Pairs("hostname", hostname))
@@ -199,8 +179,6 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 	}
 	log.Debug().Msgf("loaded %s backend engine", backendEngine.Name())
 
-	maxWorkflows := c.Int("max-workflows")
-
 	customLabels := make(map[string]string)
 	if err := stringSliceAddToMap(c.StringSlice("labels"), customLabels); err != nil {
 		return err
@@ -227,13 +205,16 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 		<-agentCtx.Done()
 		// Remove stateless agents from server
 		if !agentConfigPersisted.Load() {
-			log.Debug().Msg("unregister agent from server ...")
-			// we want to run it explicit run when context got canceled so run it in background
-			err := client.UnregisterAgent(grpcClientCtx)
-			if err != nil {
-				log.Err(err).Msg("failed to unregister agent from server")
+			if client.IsConnected() {
+				log.Debug().Msg("unregister agent from server ...")
+				err := client.UnregisterAgent(grpcClientCtx)
+				if err != nil {
+					log.Err(err).Msg("failed to unregister agent from server")
+				} else {
+					log.Info().Msg("agent unregistered from server")
+				}
 			} else {
-				log.Info().Msg("agent unregistered from server")
+				log.Debug().Msg("skipping unregister: server not connected")
 			}
 		}
 		return nil
@@ -283,10 +264,10 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 		}
 	})
 
-	for i := 0; i < maxWorkflows; i++ {
-		i := i
+	// https://go.dev/blog/go1.22 fixed scope for goroutines in loops
+	for i := range maxWorkflows {
 		serviceWaitingGroup.Go(func() error {
-			runner := agent.NewRunner(client, filter, hostname, counter, &backendEngine)
+			runner := agent.NewRunner(client, filter, hostname, counter, backendEngine)
 			log.Debug().Msgf("created new runner %d", i)
 
 			for {
@@ -294,8 +275,18 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 					return nil
 				}
 
-				log.Debug().Msg("polling new steps")
-				if err := runner.Run(agentCtx, shutdownCtx); err != nil {
+				log.Debug().Msg("polling new workflow")
+				if err := runner.Run(agentCtx); err != nil {
+					if errors.Is(err, agent_rpc.ErrConnectionLost) {
+						log.Error().Err(err).Msg("connection to server lost, shutting down agent")
+						ctxCancel(err)
+						return nil
+					}
+					if singleWorkflow {
+						log.Error().Err(err).Msg("runner done with error")
+						ctxCancel(nil)
+						return nil
+					}
 					log.Error().Err(err).Msg("runner error, retrying...")
 					// Check if context is canceled
 					if agentCtx.Err() != nil {
@@ -309,13 +300,23 @@ func run(ctx context.Context, c *cli.Command, backends []types.Backend) error {
 						// Continue to next iteration
 					}
 				}
+
+				if singleWorkflow {
+					log.Info().Msg("shutdown single workflow runner")
+					ctxCancel(nil)
+					return nil
+				}
 			}
 		})
 	}
 
-	log.Info().Msgf(
-		"starting Woodpecker agent with version '%s' and backend '%s' using platform '%s' running up to %d pipelines in parallel",
-		version.String(), backendEngine.Name(), engInfo.Platform, maxWorkflows)
+	log.Info().
+		Str("version", version.String()).
+		Str("backend", backendEngine.Name()).
+		Str("platform", engInfo.Platform).
+		Int("parallel workflows", maxWorkflows).
+		Bool("single workflow", singleWorkflow).
+		Msg("starting Woodpecker agent")
 
 	return serviceWaitingGroup.Wait()
 }
@@ -331,9 +332,9 @@ func runWithRetry(backendEngines []types.Backend) func(ctx context.Context, c *c
 		retryCount := c.Int("connect-retry-count")
 		retryDelay := c.Duration("connect-retry-delay")
 		var err error
-		for i := 0; i < retryCount; i++ {
+		for range retryCount {
 			if err = run(ctx, c, backendEngines); status.Code(err) == codes.Unavailable {
-				log.Warn().Err(err).Msg(fmt.Sprintf("cannot connect to server, retrying in %v", retryDelay))
+				log.Warn().Err(err).Msg(fmt.Sprintf("cannot connect to %s, retrying in %v", c.String("server"), retryDelay))
 				time.Sleep(retryDelay)
 			} else {
 				break

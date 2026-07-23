@@ -47,7 +47,7 @@
     },
     {
       "name": "Gitea Create Pull Request",
-      "docs": "https://codeberg.org/JohnWalkerx/gitea-pull-request-create-plugin/raw/branch/main/docs.md",
+      "docs": "https://codeberg.org/woodpecker-community/gitea-pull-request-create-plugin/raw/branch/main/docs.md",
       "verified": false
     },
     {
@@ -137,7 +137,7 @@
     },
     {
       "name": "NixOS Remote Builder",
-      "docs": "https://codeberg.org/JohnWalkerx/nix-remote-builder-plugin/raw/branch/main/docs.md",
+      "docs": "https://codeberg.org/woodpecker-community/nix-remote-builder-plugin/raw/branch/main/docs.md",
       "verified": false
     },
     {
@@ -152,7 +152,7 @@
     },
     {
       "name": "Codeberg Pages Deploy",
-      "docs": "https://codeberg.org/xfix/plugin-codeberg-pages-deploy/raw/branch/master/README.md",
+      "docs": "https://codeberg.org/sugar700/plugin-codeberg-pages-deploy/raw/branch/master/README.md",
       "verified": false
     },
     {
@@ -204,11 +204,6 @@
       "name": "Forge deployments",
       "docs": "https://raw.githubusercontent.com/woodpecker-ci/plugin-deployments/main/docs.md",
       "verified": true
-    },
-    {
-      "name": "Twine",
-      "docs": "https://gitea.elara.ws/music-kraken/plugin-twine/raw/branch/master/docs.md",
-      "verified": false
     },
     {
       "name": "Gitea Package",
@@ -282,7 +277,62 @@
     },
     {
       "name": "ASCII JUnit Test Report",
-      "docs": "https://raw.githubusercontent.com/wgroeneveld/woodpecker-ascii-junit/refs/heads/main/README.md",
+      "docs": "https://raw.githubusercontent.com/brainbaking/woodpecker-ascii-junit/refs/heads/main/README.md",
+      "verified": false
+    },
+    {
+      "name": "SonarQube",
+      "docs": "https://raw.githubusercontent.com/j04n-f/woodpecker-sonar-plugin/refs/heads/main/docs.md",
+      "verified": false
+    },
+    {
+      "name": "Github App Tokens",
+      "docs": "https://raw.githubusercontent.com/yyewolf/woodpecker-plugins/refs/heads/main/github-app-token/docs.md",
+      "verified": false
+    },
+    {
+      "name": "Github Comment",
+      "docs": "https://raw.githubusercontent.com/yyewolf/woodpecker-plugins/refs/heads/main/github-comment/docs.md",
+      "verified": false
+    },
+    {
+      "name": "BunnyCDN Cache Purge",
+      "docs": "https://codeberg.org/bentasker/woodpecker-ci-bunnycdn-cache-flush/raw/branch/main/docs.md",
+      "verified": false
+    },
+    {
+      "name": "Buildah",
+      "docs": "https://raw.githubusercontent.com/404systems/plugin-buildah/refs/heads/main/docs.md",
+      "verified": false
+    },
+    {
+      "name": "Opengrep",
+      "docs": "https://raw.githubusercontent.com/KalvadTech/woodpecker-opengrep/refs/heads/main/docs.md",
+      "verified": false
+    },
+    {
+      "name": "AgentScan",
+      "docs": "https://codeberg.org/woodpecker-plugins/agentscan/raw/branch/main/docs.md",
+      "verified": true
+    },
+    {
+      "name": "S3 Cache",
+      "docs": "https://codeberg.org/landre/woodpecker-plugins/raw/branch/main/cache/docs.md",
+      "verified": false
+    },
+    {
+      "name": "Laravel Forge",
+      "docs": "https://raw.githubusercontent.com/njaaazi/laravel-forge-woodpecker/main/docs.md",
+      "verified": false
+    },
+    {
+      "name": "Podman",
+      "docs": "https://codeberg.org/head1328/woodpecker-ci-plugin-podman/raw/branch/main/docs.md",
+      "verified": false
+    },
+    {
+      "name": "Git-pages",
+      "docs": "https://codeberg.org/gedankenstuecke/git-pages-woodpecker-plugin/raw/branch/main/README.md",
       "verified": false
     }
   ]

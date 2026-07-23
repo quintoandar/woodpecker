@@ -59,14 +59,14 @@ func GetForges(c *gin.Context) {
 // GetForge
 //
 //	@Summary	Get a forge
-//	@Router		/forges/{forgeId} [get]
+//	@Router		/forges/{forge_id} [get]
 //	@Produce	json
 //	@Success	200	{object}	Forge
 //	@Tags		Forges
 //	@Param		Authorization	header	string	false	"Insert your personal access token"	default(Bearer <personal access token>)
-//	@Param		forgeId			path	int		true	"the forge's id"
+//	@Param		forge_id		path	int		true	"the forge's id"
 func GetForge(c *gin.Context) {
-	forgeID, err := strconv.ParseInt(c.Param("forgeId"), 10, 64)
+	forgeID, err := strconv.ParseInt(c.Param("forge_id"), 10, 64)
 	if err != nil {
 		_ = c.AbortWithError(http.StatusBadRequest, err)
 		return
@@ -89,30 +89,24 @@ func GetForge(c *gin.Context) {
 // PatchForge
 //
 //	@Summary	Update a forge
-//	@Router		/forges/{forgeId} [patch]
+//	@Router		/forges/{forge_id} [patch]
 //	@Produce	json
 //	@Success	200	{object}	Forge
 //	@Tags		Forges
-//	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-//	@Param		forgeId			path	int		true	"the forge's id"
-//	@Param		forgeData		body	Forge	true	"the forge's data"
+//	@Param		Authorization	header	string						true	"Insert your personal access token"	default(Bearer <personal access token>)
+//	@Param		forge_id		path	int							true	"the forge's id"
+//	@Param		forgeData		body	ForgeWithOAuthClientSecret	true	"the forge's data"
 func PatchForge(c *gin.Context) {
 	_store := store.FromContext(c)
 
-	// use this struct to allow updating the client secret
-	type ForgeWithClientSecret struct {
-		model.Forge
-		ClientSecret string `json:"client_secret"`
-	}
-
-	in := &ForgeWithClientSecret{}
+	in := &model.ForgeWithOAuthClientSecret{}
 	err := c.Bind(in)
 	if err != nil {
 		c.AbortWithStatus(http.StatusBadRequest)
 		return
 	}
 
-	forgeID, err := strconv.ParseInt(c.Param("forgeId"), 10, 64)
+	forgeID, err := strconv.ParseInt(c.Param("forge_id"), 10, 64)
 	if err != nil {
 		_ = c.AbortWithError(http.StatusBadRequest, err)
 		return
@@ -129,8 +123,8 @@ func PatchForge(c *gin.Context) {
 	forge.OAuthHost = in.OAuthHost
 	forge.SkipVerify = in.SkipVerify
 	forge.AdditionalOptions = in.AdditionalOptions
-	if in.ClientSecret != "" {
-		forge.OAuthClientSecret = in.ClientSecret
+	if in.OAuthClientSecret != "" {
+		forge.OAuthClientSecret = in.OAuthClientSecret
 	}
 
 	err = _store.ForgeUpdate(forge)
@@ -150,10 +144,10 @@ func PatchForge(c *gin.Context) {
 //	@Produce		json
 //	@Success		200	{object}	Forge
 //	@Tags			Forges
-//	@Param			Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-//	@Param			forge			body	Forge	true	"the forge's data (only 'name' and 'no_schedule' are read)"
+//	@Param			Authorization	header	string						true	"Insert your personal access token"	default(Bearer <personal access token>)
+//	@Param			forge			body	ForgeWithOAuthClientSecret	true	"the forge's data (only 'name' and 'no_schedule' are read)"
 func PostForge(c *gin.Context) {
-	in := &model.Forge{}
+	in := &model.ForgeWithOAuthClientSecret{}
 	err := c.Bind(in)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
@@ -179,16 +173,16 @@ func PostForge(c *gin.Context) {
 // DeleteForge
 //
 //	@Summary	Delete a forge
-//	@Router		/forges/{forgeId} [delete]
+//	@Router		/forges/{forge_id} [delete]
 //	@Produce	plain
 //	@Success	200
 //	@Tags		Forges
 //	@Param		Authorization	header	string	true	"Insert your personal access token"	default(Bearer <personal access token>)
-//	@Param		forgeId			path	int		true	"the forge's id"
+//	@Param		forge_id		path	int		true	"the forge's id"
 func DeleteForge(c *gin.Context) {
 	_store := store.FromContext(c)
 
-	forgeID, err := strconv.ParseInt(c.Param("forgeId"), 10, 64)
+	forgeID, err := strconv.ParseInt(c.Param("forge_id"), 10, 64)
 	if err != nil {
 		_ = c.AbortWithError(http.StatusBadRequest, err)
 		return

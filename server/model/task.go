@@ -16,7 +16,7 @@ package model
 
 import (
 	"fmt"
-	"strings"
+	"slices"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline"
 )
@@ -24,12 +24,25 @@ import (
 // Task defines scheduled pipeline Task.
 type Task struct {
 	ID           string                 `json:"id"           xorm:"PK UNIQUE 'id'"`
+	PID          int                    `json:"pid"          xorm:"'pid'"`
+	Name         string                 `json:"name"         xorm:"'name'"`
 	Data         []byte                 `json:"-"            xorm:"LONGBLOB 'data'"`
 	Labels       map[string]string      `json:"labels"       xorm:"json 'labels'"`
 	Dependencies []string               `json:"dependencies" xorm:"json 'dependencies'"`
 	RunOn        []string               `json:"run_on"       xorm:"json 'run_on'"`
 	DepStatus    map[string]StatusValue `json:"dep_status"   xorm:"json 'dependencies_status'"`
 	AgentID      int64                  `json:"agent_id"     xorm:"'agent_id'"`
+	PipelineID   int64                  `json:"pipeline_id"  xorm:"'pipeline_id'"`
+	RepoID       int64                  `json:"repo_id"      xorm:"'repo_id'"`
+	// ConcurrencyLimit is the maximum number of tasks sharing the same
+	// ConcurrencyGroup that may run at once. A value <= 0 means unlimited.
+	ConcurrencyLimit int `json:"concurrency_limit" xorm:"NOT NULL DEFAULT 0 'concurrency_limit'"`
+	// ConcurrencyGroup identifies tasks that are limited against each other.
+	// It is empty when no concurrency limit applies.
+	ConcurrencyGroup string `json:"concurrency_group" xorm:"'concurrency_group'"`
+	// Created is the unix timestamp the task's pipeline was created at. It
+	// defines the queue ordering across pipelines.
+	Created int64 `json:"created" xorm:"NOT NULL DEFAULT 0 'created'"`
 } //	@name	Task
 
 // TableName return database table name for xorm.
@@ -38,9 +51,7 @@ func (Task) TableName() string {
 }
 
 func (t *Task) String() string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s (%s) - %s", t.ID, t.Dependencies, t.DepStatus)
-	return sb.String()
+	return fmt.Sprintf("%s (%s) - %s", t.ID, t.Dependencies, t.DepStatus)
 }
 
 func (t *Task) ApplyLabelsFromRepo(r *Repo) error {
@@ -83,12 +94,7 @@ func (t *Task) ShouldRun() bool {
 }
 
 func (t *Task) runsOnFailure() bool {
-	for _, status := range t.RunOn {
-		if status == string(StatusFailure) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(t.RunOn, string(StatusFailure))
 }
 
 func (t *Task) runsOnSuccess() bool {
@@ -96,10 +102,5 @@ func (t *Task) runsOnSuccess() bool {
 		return true
 	}
 
-	for _, status := range t.RunOn {
-		if status == string(StatusSuccess) {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(t.RunOn, string(StatusSuccess))
 }

@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v2"
+	"codeberg.org/mvdkleijn/forgejo-sdk/forgejo/v3"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 
@@ -34,6 +34,7 @@ import (
 	forge_types "go.woodpecker-ci.org/woodpecker/v3/server/forge/types"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 	"go.woodpecker-ci.org/woodpecker/v3/server/store"
+	"go.woodpecker-ci.org/woodpecker/v3/shared/httputil"
 	shared_utils "go.woodpecker-ci.org/woodpecker/v3/shared/utils"
 )
 
@@ -45,6 +46,7 @@ const (
 )
 
 type Forgejo struct {
+	id                int64
 	url               string
 	oauth2URL         string
 	oAuthClientID     string
@@ -64,12 +66,13 @@ type Opts struct {
 
 // New returns a Forge implementation that integrates with Forgejo,
 // an open source Git service written in Go. See https://forgejo.org/
-func New(opts Opts) (forge.Forge, error) {
+func New(id int64, opts Opts) (forge.Forge, error) {
 	if opts.OAuth2URL == "" {
 		opts.OAuth2URL = opts.URL
 	}
 
 	return &Forgejo{
+		id:                id,
 		url:               opts.URL,
 		oauth2URL:         opts.OAuth2URL,
 		oAuthClientID:     opts.OAuthClientID,
@@ -141,20 +144,6 @@ func (c *Forgejo) Login(ctx context.Context, req *forge_types.OAuthRequest) (*mo
 	}, redirectURL, nil
 }
 
-// Auth uses the Forgejo oauth2 access token and refresh token to authenticate
-// a session and return the Forgejo account login.
-func (c *Forgejo) Auth(ctx context.Context, token, _ string) (string, error) {
-	client, err := c.newClientToken(ctx, token)
-	if err != nil {
-		return "", err
-	}
-	user, _, err := client.GetMyUserInfo()
-	if err != nil {
-		return "", err
-	}
-	return user.UserName, nil
-}
-
 // Refresh refreshes the Forgejo oauth2 access token. If the token is
 // refreshed, the user is updated and a true value is returned.
 func (c *Forgejo) Refresh(ctx context.Context, user *model.User) (bool, error) {
@@ -179,7 +168,12 @@ func (c *Forgejo) Refresh(ctx context.Context, user *model.User) (bool, error) {
 }
 
 // Teams is supported by the Forgejo driver.
-func (c *Forgejo) Teams(ctx context.Context, u *model.User) ([]*model.Team, error) {
+func (c *Forgejo) Teams(ctx context.Context, u *model.User, p *model.ListOptions) ([]*model.Team, error) {
+	// we paginate internally (https://github.com/woodpecker-ci/woodpecker/issues/5667)
+	if p.Page != 1 {
+		return nil, nil
+	}
+
 	client, err := c.newClientToken(ctx, u.AccessToken)
 	if err != nil {
 		return nil, err
@@ -219,15 +213,21 @@ func (c *Forgejo) Repo(ctx context.Context, u *model.User, remoteID model.ForgeR
 		if err != nil {
 			return nil, err
 		}
-		repo, _, err := client.GetRepoByID(intID)
+		repo, resp, err := client.GetRepoByID(intID)
 		if err != nil {
+			if resp != nil && resp.StatusCode == http.StatusNotFound {
+				return nil, errors.Join(err, forge_types.ErrRepoNotFound)
+			}
 			return nil, err
 		}
 		return toRepo(repo), nil
 	}
 
-	repo, _, err := client.GetRepo(owner, name)
+	repo, resp, err := client.GetRepo(owner, name)
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil, errors.Join(err, forge_types.ErrRepoNotFound)
+		}
 		return nil, err
 	}
 	return toRepo(repo), nil
@@ -235,7 +235,12 @@ func (c *Forgejo) Repo(ctx context.Context, u *model.User, remoteID model.ForgeR
 
 // Repos returns a list of all repositories for the Forgejo account, including
 // organization repositories.
-func (c *Forgejo) Repos(ctx context.Context, u *model.User) ([]*model.Repo, error) {
+func (c *Forgejo) Repos(ctx context.Context, u *model.User, p *model.ListOptions) ([]*model.Repo, error) {
+	// we paginate internally (https://github.com/woodpecker-ci/woodpecker/issues/5667)
+	if p.Page != 1 {
+		return nil, nil
+	}
+
 	client, err := c.newClientToken(ctx, u.AccessToken)
 	if err != nil {
 		return nil, err
@@ -286,8 +291,11 @@ func (c *Forgejo) Dir(ctx context.Context, u *model.User, r *model.Repo, b *mode
 	}
 
 	// List files in repository
-	contents, _, err := client.ListContents(r.Owner, r.Name, b.Commit, f)
+	contents, resp, err := client.ListContents(r.Owner, r.Name, b.Commit, f)
 	if err != nil {
+		if resp != nil && resp.StatusCode == http.StatusNotFound {
+			return nil, errors.Join(err, &forge_types.ErrConfigNotFound{Configs: []string{f}})
+		}
 		return nil, err
 	}
 
@@ -396,8 +404,14 @@ func (c *Forgejo) Deactivate(ctx context.Context, u *model.User, r *model.Repo, 
 		return err
 	}
 
+	// make sure a repo rename does not trick us
+	forgeRepo, err := c.Repo(ctx, u, r.ForgeRemoteID, r.Owner, r.Name)
+	if err != nil {
+		return err
+	}
+
 	hooks, err := shared_utils.Paginate(func(page int) ([]*forgejo.Hook, error) {
-		hooks, _, err := client.ListRepoHooks(r.Owner, r.Name, forgejo.ListHooksOptions{
+		hooks, _, err := client.ListRepoHooks(forgeRepo.Owner, forgeRepo.Name, forgejo.ListHooksOptions{
 			ListOptions: forgejo.ListOptions{
 				Page:     page,
 				PageSize: c.perPage(ctx),
@@ -411,7 +425,7 @@ func (c *Forgejo) Deactivate(ctx context.Context, u *model.User, r *model.Repo, 
 
 	hook := matchingHooks(hooks, link)
 	if hook != nil {
-		_, err := client.DeleteRepoHook(r.Owner, r.Name, hook.ID)
+		_, err := client.DeleteRepoHook(forgeRepo.Owner, forgeRepo.Name, hook.ID)
 		return err
 	}
 
@@ -498,7 +512,7 @@ func (c *Forgejo) Hook(ctx context.Context, r *http.Request) (*model.Repo, *mode
 		pipeline.Commit = sha
 	}
 
-	if pipeline != nil && (pipeline.Event == model.EventPull || pipeline.Event == model.EventPullClosed) && len(pipeline.ChangedFiles) == 0 {
+	if pipeline != nil && pipeline.IsPullRequest() && len(pipeline.ChangedFiles) == 0 {
 		index, err := strconv.ParseInt(strings.Split(pipeline.Ref, "/")[2], 10, 64)
 		if err != nil {
 			return nil, nil, err
@@ -573,12 +587,13 @@ func (c *Forgejo) newClientToken(ctx context.Context, token string) (*forgejo.Cl
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 	}
-	client, err := forgejo.NewClient(c.url, forgejo.SetToken(token), forgejo.SetHTTPClient(httpClient), forgejo.SetContext(ctx))
+	wrappedClient := httputil.WrapClient(httpClient, "forge-forgejo")
+	client, err := forgejo.NewClient(c.url, forgejo.SetToken(token), forgejo.SetHTTPClient(wrappedClient), forgejo.SetContext(ctx))
 	if err != nil &&
 		(errors.Is(err, &forgejo.ErrUnknownVersion{}) || strings.Contains(err.Error(), "Malformed version")) {
 		// we guess it's a dev forgejo version
 		log.Error().Err(err).Msgf("could not detect forgejo version, assume dev version %s", forgejoDevVersion)
-		client, err = forgejo.NewClient(c.url, forgejo.SetForgejoVersion(forgejoDevVersion), forgejo.SetToken(token), forgejo.SetHTTPClient(httpClient), forgejo.SetContext(ctx))
+		client, err = forgejo.NewClient(c.url, forgejo.SetForgejoVersion(forgejoDevVersion), forgejo.SetToken(token), forgejo.SetHTTPClient(wrappedClient), forgejo.SetContext(ctx))
 	}
 	return client, err
 }
@@ -613,7 +628,7 @@ func (c *Forgejo) getChangedFilesForPR(ctx context.Context, repo *model.Repo, in
 		return []string{}, nil
 	}
 
-	repo, err := _store.GetRepoNameFallback(repo.ForgeRemoteID, repo.FullName)
+	repo, err := _store.GetRepoNameFallback(c.id, repo.ForgeRemoteID, repo.FullName)
 	if err != nil {
 		return nil, err
 	}
@@ -622,6 +637,8 @@ func (c *Forgejo) getChangedFilesForPR(ctx context.Context, repo *model.Repo, in
 	if err != nil {
 		return nil, err
 	}
+
+	forge.Refresh(ctx, c, _store, user)
 
 	client, err := c.newClientToken(ctx, user.AccessToken)
 	if err != nil {
@@ -650,7 +667,7 @@ func (c *Forgejo) getTagCommitSHA(ctx context.Context, repo *model.Repo, tagName
 		return "", nil
 	}
 
-	repo, err := _store.GetRepoNameFallback(repo.ForgeRemoteID, repo.FullName)
+	repo, err := _store.GetRepoNameFallback(c.id, repo.ForgeRemoteID, repo.FullName)
 	if err != nil {
 		return "", err
 	}
@@ -659,6 +676,8 @@ func (c *Forgejo) getTagCommitSHA(ctx context.Context, repo *model.Repo, tagName
 	if err != nil {
 		return "", err
 	}
+
+	forge.Refresh(ctx, c, _store, user)
 
 	client, err := c.newClientToken(ctx, user.AccessToken)
 	if err != nil {
