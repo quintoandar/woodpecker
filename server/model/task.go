@@ -39,7 +39,7 @@ func (Task) TableName() string {
 
 func (t *Task) String() string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("%s (%s) - %s", t.ID, t.Dependencies, t.DepStatus))
+	fmt.Fprintf(&sb, "%s (%s) - %s", t.ID, t.Dependencies, t.DepStatus)
 	return sb.String()
 }
 

@@ -38,13 +38,17 @@ func TestGraphQLEndpoint(t *testing.T) {
 
 	cloud, err := New(Opts{URL: defaultURL})
 	require.NoError(t, err)
-	assert.Equal(t, "https://api.github.com/graphql", cloud.(*client).graphqlEndpoint())
-	assert.Equal(t, defaultAPI, cloud.(*client).API)
+	cloudClient, ok := cloud.(*client)
+	require.True(t, ok)
+	assert.Equal(t, "https://api.github.com/graphql", cloudClient.graphqlEndpoint())
+	assert.Equal(t, defaultAPI, cloudClient.API)
 
 	ghe, err := New(Opts{URL: "https://ghe.example.com/"})
 	require.NoError(t, err)
-	assert.Equal(t, "https://ghe.example.com/api/graphql", ghe.(*client).graphqlEndpoint())
-	assert.Equal(t, "https://ghe.example.com/api/v3/", ghe.(*client).API)
+	gheClient, ok := ghe.(*client)
+	require.True(t, ok)
+	assert.Equal(t, "https://ghe.example.com/api/graphql", gheClient.graphqlEndpoint())
+	assert.Equal(t, "https://ghe.example.com/api/v3/", gheClient.API)
 }
 
 func withGraphQLServer(t *testing.T, handler http.HandlerFunc) *client {
@@ -54,7 +58,9 @@ func withGraphQLServer(t *testing.T, handler http.HandlerFunc) *client {
 
 	forge, err := New(Opts{URL: s.URL, SkipVerify: true})
 	require.NoError(t, err)
-	return forge.(*client)
+	forgeClient, ok := forge.(*client)
+	require.True(t, ok)
+	return forgeClient
 }
 
 func TestDirGraphQL(t *testing.T) {
@@ -79,8 +85,8 @@ func TestDirGraphQL(t *testing.T) {
 				"repository": {
 					"object": {
 						"entries": [
-							{"name": "a.yml", "path": ".woodpecker/a.yml", "type": "blob", "object": {"text": ` + jsonString(yamlA) + `, "isBinary": false, "isTruncated": false}},
-							{"name": "b.yaml", "path": ".woodpecker/b.yaml", "type": "blob", "object": {"text": ` + jsonString(yamlB) + `, "isBinary": false, "isTruncated": false}},
+							{"name": "a.yml", "path": ".woodpecker/a.yml", "type": "blob", "object": {"text": ` + jsonString(t, yamlA) + `, "isBinary": false, "isTruncated": false}},
+							{"name": "b.yaml", "path": ".woodpecker/b.yaml", "type": "blob", "object": {"text": ` + jsonString(t, yamlB) + `, "isBinary": false, "isTruncated": false}},
 							{"name": "notes.txt", "path": ".woodpecker/notes.txt", "type": "blob", "object": {"text": "ignore", "isBinary": false, "isTruncated": false}},
 							{"name": "subdir", "path": ".woodpecker/subdir", "type": "tree", "object": null},
 							{"name": "logo.png", "path": ".woodpecker/logo.png", "type": "blob", "object": {"text": null, "isBinary": true, "isTruncated": false}}
@@ -174,7 +180,7 @@ func TestDirGraphQLTruncatedBlobFallsBackToREST(t *testing.T) {
 		case strings.Contains(r.URL.Path, "/contents/.woodpecker/big.yml"):
 			encoded := base64.StdEncoding.EncodeToString([]byte(fullYAML))
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(fmt.Sprintf(`{
+			_, _ = fmt.Fprintf(w, `{
 				"name": "big.yml",
 				"path": ".woodpecker/big.yml",
 				"type": "file",
@@ -182,7 +188,7 @@ func TestDirGraphQLTruncatedBlobFallsBackToREST(t *testing.T) {
 				"content": %s,
 				"sha": "abc",
 				"size": %d
-			}`, jsonString(encoded+"\n"), len(fullYAML))))
+			}`, jsonString(t, encoded+"\n"), len(fullYAML))
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -208,10 +214,9 @@ func TestDirGraphQLHTTPError(t *testing.T) {
 	assert.Contains(t, err.Error(), "502")
 }
 
-func jsonString(s string) string {
+func jsonString(t testing.TB, s string) string {
+	t.Helper()
 	b, err := json.Marshal(s)
-	if err != nil {
-		panic(err)
-	}
+	require.NoError(t, err)
 	return string(b)
 }
