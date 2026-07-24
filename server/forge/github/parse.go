@@ -32,12 +32,11 @@ import (
 const (
 	hookField = "payload"
 
-	actionOpen           = "opened"
-	actionReopen         = "reopened"
-	actionClose          = "closed"
-	actionSync           = "synchronize"
-	actionReadyForReview = "ready_for_review"
-	actionReleased       = "released"
+	actionOpen     = "opened"
+	actionReopen   = "reopened"
+	actionClose    = "closed"
+	actionSync     = "synchronize"
+	actionReleased = "released"
 
 	stateOpen  = "open"
 	stateClose = "closed"
@@ -153,8 +152,7 @@ func parsePullHook(hook *github.PullRequestEvent, merge bool) (*github.PullReque
 	if hook.GetAction() != actionOpen &&
 		hook.GetAction() != actionSync &&
 		hook.GetAction() != actionClose &&
-		hook.GetAction() != actionReopen &&
-		hook.GetAction() != actionReadyForReview {
+		hook.GetAction() != actionReopen {
 		return nil, nil, nil, nil
 	}
 
