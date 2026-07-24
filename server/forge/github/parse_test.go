@@ -143,6 +143,17 @@ func Test_parseHook(t *testing.T) {
 		assert.True(t, strings.HasPrefix(b.Ref, "refs/tags/"))
 	})
 
+	t.Run("PR ready for review hook", func(t *testing.T) {
+		payload := strings.Replace(fixtures.HookPullRequest, `"action": "opened",`, `"action": "ready_for_review",`, 1)
+		req := testHookRequest([]byte(payload), hookPull)
+		p, r, b, err := parseHook(req, false)
+		assert.NoError(t, err)
+		assert.NotNil(t, r)
+		assert.NotNil(t, b)
+		assert.NotNil(t, p)
+		assert.Equal(t, model.EventPull, b.Event)
+		assert.False(t, b.PullRequestDraft)
+	})
 	t.Run("reopen a pull", func(t *testing.T) {
 		req := testHookRequest([]byte(fixtures.HookPullRequestReopened), hookPull)
 		p, r, b, err := parseHook(req, false)
