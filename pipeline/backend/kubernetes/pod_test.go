@@ -851,3 +851,17 @@ func TestStepSecret(t *testing.T) {
 	ja := jsonassert.New(t)
 	ja.Assertf(string(secretJSON), expected)
 }
+
+func TestCloneContainerUsesWorkspaceBaseAsWorkingDir(t *testing.T) {
+	container, err := podContainer(&types.Step{
+		Name:          "clone",
+		Type:          types.StepTypeClone,
+		Image:         "woodpeckerci/plugin-git:2.10.0",
+		UUID:          "01he8bebctabr3kgk0qj36d2me-0",
+		WorkingDir:    "/woodpecker/src/github.com/quintoandar/example",
+		WorkspaceBase: "/woodpecker",
+		Volumes:       []string{"workspace:/woodpecker"},
+	}, "clone", "linux/amd64", BackendOptions{}, nativeSecretsProcessor{})
+	assert.NoError(t, err)
+	assert.Equal(t, "/woodpecker", container.WorkingDir)
+}

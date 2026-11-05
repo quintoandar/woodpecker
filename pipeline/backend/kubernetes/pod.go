@@ -240,6 +240,14 @@ func podContainer(step *types.Step, podName, goos string, options BackendOptions
 		// step.WorkingDir will be respected by the generated script
 		container.WorkingDir = step.WorkspaceBase
 	}
+	if step.Type == types.StepTypeClone {
+		// The clone plugin creates step.WorkingDir itself with permissions that
+		// allow subsequent pipeline steps to use the shared workspace. Setting
+		// the container working directory to the checkout path lets some CRIs
+		// create its intermediate directories first with their default mode,
+		// preventing non-root steps from writing to them.
+		container.WorkingDir = step.WorkspaceBase
+	}
 	if len(step.Entrypoint) > 0 {
 		container.Command = step.Entrypoint
 	}
