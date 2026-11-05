@@ -467,6 +467,7 @@ func podSecurityContext(sc *SecurityContext, secCtxConf SecurityContextConfig, s
 		group               *int64
 		fsGroup             *int64
 		fsGroupChangePolicy *v1.PodFSGroupChangePolicy
+		selinux             *v1.SELinuxOptions
 		seccomp             *v1.SeccompProfile
 		apparmor            *v1.AppArmorProfile
 	)
@@ -476,6 +477,9 @@ func podSecurityContext(sc *SecurityContext, secCtxConf SecurityContextConfig, s
 	}
 	if secCtxConf.FSGroup != nil {
 		fsGroup = secCtxConf.FSGroup
+	}
+	if secCtxConf.SELinuxLevel != "" {
+		selinux = &v1.SELinuxOptions{Level: secCtxConf.SELinuxLevel}
 	}
 
 	if sc != nil {
@@ -509,7 +513,7 @@ func podSecurityContext(sc *SecurityContext, secCtxConf SecurityContextConfig, s
 		fsGroupChangePolicy = sc.FsGroupChangePolicy
 	}
 
-	if nonRoot == nil && user == nil && group == nil && fsGroup == nil && seccomp == nil && apparmor == nil {
+	if nonRoot == nil && user == nil && group == nil && fsGroup == nil && selinux == nil && seccomp == nil && apparmor == nil {
 		return nil
 	}
 
@@ -519,6 +523,7 @@ func podSecurityContext(sc *SecurityContext, secCtxConf SecurityContextConfig, s
 		RunAsGroup:          group,
 		FSGroup:             fsGroup,
 		FSGroupChangePolicy: fsGroupChangePolicy,
+		SELinuxOptions:      selinux,
 		SeccompProfile:      seccomp,
 		AppArmorProfile:     apparmor,
 	}

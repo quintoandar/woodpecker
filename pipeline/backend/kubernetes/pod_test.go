@@ -498,6 +498,14 @@ func TestPodPrivilege(t *testing.T) {
 	assert.True(t, *pod.Spec.SecurityContext.RunAsNonRoot)
 }
 
+func TestPodSecurityContextSELinuxLevel(t *testing.T) {
+	securityContext := podSecurityContext(nil, SecurityContextConfig{
+		SELinuxLevel: "s0:c521,c777",
+	}, false)
+
+	assert.Equal(t, "s0:c521,c777", securityContext.SELinuxOptions.Level)
+}
+
 func TestScratchPod(t *testing.T) {
 	const expected = `
 	{

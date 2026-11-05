@@ -96,6 +96,11 @@ var Flags = []cli.Flag{
 		Name:    "backend-k8s-secctx-nonroot",
 		Usage:   "`run as non root` Kubernetes security context option",
 	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_SECCTX_SELINUX_LEVEL"), // cspell:words secctx selinux
+		Name:    "backend-k8s-secctx-selinux-level",
+		Usage:   "SELinux level to apply to Kubernetes worker Pods",
+	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_BACKEND_K8S_PULL_SECRET_NAMES"),
 		Name:    "backend-k8s-pod-image-pull-secret-names",
