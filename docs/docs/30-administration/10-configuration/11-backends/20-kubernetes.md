@@ -425,6 +425,18 @@ Determines if containers must be required to run as non-root users.
 
 ---
 
+### BACKEND_K8S_SECCTX_SELINUX_LEVEL <!-- cspell:ignore SECCTX SELINUX -->
+
+- Name: `WOODPECKER_BACKEND_K8S_SECCTX_SELINUX_LEVEL`
+- Default: none
+
+SELinux level to apply to every worker Pod created by this agent. Configure this
+when workflow steps share a volume on SELinux-enforcing nodes: all Pods that
+mount the shared volume must use the same level. This is an agent-wide setting
+and cannot be set by pipeline configuration.
+
+---
+
 ### BACKEND_K8S_PULL_SECRET_NAMES
 
 - Name: `WOODPECKER_BACKEND_K8S_PULL_SECRET_NAMES`

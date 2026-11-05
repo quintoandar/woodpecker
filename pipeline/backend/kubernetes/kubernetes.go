@@ -85,6 +85,7 @@ func (c *config) GetNamespace(orgID int64) string {
 type SecurityContextConfig struct {
 	RunAsNonRoot bool
 	FSGroup      *int64
+	SELinuxLevel string
 }
 
 func newDefaultDeleteOptions() meta_v1.DeleteOptions {
@@ -117,6 +118,7 @@ func configFromCliContext(ctx context.Context) (*config, error) {
 				SecurityContext: SecurityContextConfig{
 					RunAsNonRoot: c.Bool("backend-k8s-secctx-nonroot"), // cspell:words secctx nonroot
 					FSGroup:      newInt64(defaultFSGroup),
+					SELinuxLevel: c.String("backend-k8s-secctx-selinux-level"),
 				},
 				NativeSecretsAllowFromStep: c.Bool("backend-k8s-allow-native-secrets"),
 			}
