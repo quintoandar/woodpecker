@@ -16,11 +16,17 @@ patterns=(
 
 echo "Scanning ${ROOT} for deprecated Woodpecker v2 patterns (Go/TS/Python only)..."
 for p in "${patterns[@]}"; do
-  if rg -l "$p" "$ROOT" \
-    --type go --type py --type ts --type tsx \
+  # ts type already covers .tsx; rg exit 1 = no match, >1 = real error (must not read as "clean")
+  rc=0
+  rg -l "$p" "$ROOT" \
+    --type go --type py --type ts \
     --glob '!**/node_modules/**' \
-    --glob '!**/.git/**' \
-    2>/dev/null; then
+    --glob '!**/.git/**' || rc=$?
+  if [[ "$rc" -gt 1 ]]; then
+    echo "rg failed (exit $rc) for pattern: $p" >&2
+    exit 2
+  fi
+  if [[ "$rc" -eq 0 ]]; then
     echo "  ^ matched pattern: $p"
     FOUND=1
   fi
