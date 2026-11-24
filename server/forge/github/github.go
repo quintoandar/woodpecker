@@ -25,10 +25,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gofri/go-github-ratelimit/v2/github_ratelimit"
-	"github.com/google/go-github/v88/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/oauth2"
 
@@ -164,10 +163,9 @@ func (c *client) Refresh(ctx context.Context, user *model.User) (bool, error) {
 
 	config := c.newConfig()
 
+	// Refresh token only: a stored access token makes oauth2 skip the exchange.
 	source := config.TokenSource(ctx, &oauth2.Token{
-		AccessToken:  user.AccessToken,
 		RefreshToken: user.RefreshToken,
-		Expiry:       time.Unix(user.Expiry, 0),
 	})
 
 	token, err := source.Token()
@@ -299,11 +297,9 @@ func (c *client) PullRequests(ctx context.Context, u *model.User, r *model.Repo,
 	}
 
 	pullRequests, _, err := client.PullRequests.List(ctx, r.Owner, r.Name, &github.PullRequestListOptions{
-		ListOptions: github.ListOptions{
-			Page:    p.Page,
-			PerPage: perPage(p.PerPage),
-		},
-		State: "open",
+		Page:    p.Page,
+		PerPage: perPage(p.PerPage),
+		State:   "open",
 	})
 	if err != nil {
 		return nil, err
@@ -491,7 +487,7 @@ func (c *client) newClientToken(ctx context.Context, token string) (*github.Clie
 		return nil, err
 	}
 
-	return github.NewClient(github.WithURLs(github.Ptr(c.API), nil), github.WithHTTPClient(tc))
+	return github.NewClient(github.WithURLs(new(c.API), nil), github.WithHTTPClient(tc))
 }
 
 // matchingEmail returns matching user email.
@@ -549,19 +545,19 @@ func (c *client) Status(ctx context.Context, user *model.User, repo *model.Repo,
 		}
 		id, _ := strconv.Atoi(matches[1])
 
-		_, _, err := client.Repositories.CreateDeploymentStatus(ctx, repo.Owner, repo.Name, int64(id), &github.DeploymentStatusRequest{
-			State:       github.Ptr(convertStatus(pipeline.Status)),
-			Description: github.Ptr(common.GetPipelineStatusDescription(pipeline.Status)),
-			LogURL:      github.Ptr(common.GetPipelineStatusURL(repo, pipeline, nil)),
+		_, _, err := client.Repositories.CreateDeploymentStatus(ctx, repo.Owner, repo.Name, int64(id), github.DeploymentStatusRequest{
+			State:       convertStatus(pipeline.Status),
+			Description: new(common.GetPipelineStatusDescription(pipeline.Status)),
+			LogURL:      new(common.GetPipelineStatusURL(repo, pipeline, nil)),
 		})
 		return err
 	}
 
 	_, _, err = client.Repositories.CreateStatus(ctx, repo.Owner, repo.Name, pipeline.Commit, github.RepoStatus{
-		Context:     github.Ptr(common.GetPipelineStatusContext(repo, pipeline, workflow)),
-		State:       github.Ptr(convertStatus(workflow.State)),
-		Description: github.Ptr(common.GetPipelineStatusDescription(workflow.State)),
-		TargetURL:   github.Ptr(common.GetPipelineStatusURL(repo, pipeline, workflow)),
+		Context:     new(common.GetPipelineStatusContext(repo, pipeline, workflow)),
+		State:       new(convertStatus(workflow.State)),
+		Description: new(common.GetPipelineStatusDescription(workflow.State)),
+		TargetURL:   new(common.GetPipelineStatusURL(repo, pipeline, workflow)),
 	})
 	return err
 }
@@ -577,7 +573,7 @@ func (c *client) Activate(ctx context.Context, u *model.User, r *model.Repo, lin
 		return err
 	}
 	hook := &github.Hook{
-		Name: github.Ptr("web"),
+		Name: new("web"),
 		Events: []string{
 			"push",
 			"pull_request",
@@ -586,7 +582,7 @@ func (c *client) Activate(ctx context.Context, u *model.User, r *model.Repo, lin
 		},
 		Config: &github.HookConfig{
 			URL:         &link,
-			ContentType: github.Ptr("form"),
+			ContentType: new("form"),
 		},
 	}
 	_, _, err = client.Repositories.CreateHook(ctx, r.Owner, r.Name, hook)
@@ -602,10 +598,8 @@ func (c *client) Branches(ctx context.Context, u *model.User, r *model.Repo, p *
 	}
 
 	githubBranches, _, err := client.Repositories.ListBranches(ctx, r.Owner, r.Name, &github.BranchListOptions{
-		ListOptions: github.ListOptions{
-			Page:    p.Page,
-			PerPage: perPage(p.PerPage),
-		},
+		Page:    p.Page,
+		PerPage: perPage(p.PerPage),
 	})
 	if err != nil {
 		return nil, err
@@ -643,13 +637,20 @@ func (c *client) Hook(ctx context.Context, r *http.Request) (*model.Repo, *model
 		return nil, nil, err
 	}
 
-	if pipeline != nil && pipeline.Event == model.EventRelease && pipeline.Commit == "" {
-		tagName := strings.Split(pipeline.Ref, "/")[2]
-		sha, err := c.getTagCommitSHA(ctx, repo, tagName)
-		if err != nil {
-			return nil, nil, err
+	if pipeline != nil {
+		switch pipeline.Event { //nolint:gocritic // ignore lint issue as this will get more cases later
+		case model.EventRelease:
+			if pipeline.TagTitle == "" {
+				pipeline.TagTitle = strings.Split(pipeline.Ref, "/")[2]
+			}
+			if pipeline.Commit == "" {
+				sha, err := c.getTagCommitSHA(ctx, repo, pipeline.TagTitle)
+				if err != nil {
+					return nil, nil, err
+				}
+				pipeline.Commit = sha
+			}
 		}
-		pipeline.Commit = sha
 	}
 
 	if pull != nil {
@@ -741,10 +742,10 @@ func (c *client) getTagCommitSHA(ctx context.Context, repo *model.Repo, tagName 
 		return "", err
 	}
 
-	page := 1
+	opts := &github.ListOptions{Page: 1}
 	var tag *github.RepositoryTag
-	for {
-		tags, _, err := gh.Repositories.ListTags(ctx, repo.Owner, repo.Name, &github.ListOptions{Page: page})
+	for opts.Page > 0 {
+		tags, resp, err := gh.Repositories.ListTags(ctx, repo.Owner, repo.Name, opts)
 		if err != nil {
 			return "", err
 		}
@@ -758,6 +759,8 @@ func (c *client) getTagCommitSHA(ctx context.Context, repo *model.Repo, tagName 
 		if tag != nil {
 			break
 		}
+
+		opts.Page = resp.NextPage
 	}
 	if tag == nil {
 		return "", fmt.Errorf("could not find tag %s", tagName)

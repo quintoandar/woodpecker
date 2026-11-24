@@ -26,9 +26,10 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/cenkalti/backoff/v6"
+	"github.com/cenkalti/backoff/v7"
 	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v3"
 	kube_core_v1 "k8s.io/api/core/v1"
@@ -61,6 +62,7 @@ type kube struct {
 type config struct {
 	Namespace                       string
 	EnableNamespacePerOrg           bool
+	ClusterDomain                   string
 	StorageClass                    string
 	VolumeSize                      string
 	StorageRwx                      bool
@@ -69,10 +71,12 @@ type config struct {
 	PodAnnotations                  map[string]string
 	PodAnnotationsAllowFromStep     bool
 	PodNodeSelector                 map[string]string
+	PodNodeSelectorAllowFromStep    bool
 	PodTolerationsAllowFromStep     bool
 	PodTolerations                  []Toleration
 	PodAffinity                     *kube_core_v1.Affinity
 	PodAffinityAllowFromStep        bool
+	RuntimeClassAllowFromStep       bool
 	ImagePullSecretNames            []string
 	SecurityContext                 SecurityContextConfig
 	NativeSecretsAllowFromStep      bool
@@ -80,6 +84,7 @@ type config struct {
 	PriorityClassName               string
 	StopTimeout                     int64
 	PermissionInitImage             string
+	EnableUserNamespaces            bool
 }
 
 func (c *config) GetNamespace(orgID int64) string {
@@ -90,8 +95,9 @@ func (c *config) GetNamespace(orgID int64) string {
 }
 
 type SecurityContextConfig struct {
-	RunAsNonRoot bool
-	FSGroup      *int64
+	RunAsNonRoot                    bool
+	FSGroup                         *int64
+	OverrideNonRootInUserNamespaces bool
 }
 
 func (c *config) newDefaultDeleteOptions() kube_meta_v1.DeleteOptions {
@@ -107,24 +113,29 @@ func configFromCliContext(ctx context.Context) (*config, error) {
 	if ctx != nil {
 		if c, ok := ctx.Value(types.CliCommand).(*cli.Command); ok {
 			config := config{
-				Namespace:                   c.String("backend-k8s-namespace"),
-				EnableNamespacePerOrg:       c.Bool("backend-k8s-namespace-per-org"),
-				StorageClass:                c.String("backend-k8s-storage-class"),
-				VolumeSize:                  c.String("backend-k8s-volume-size"),
-				StorageRwx:                  c.Bool("backend-k8s-storage-rwx"),
-				PriorityClassName:           c.String("backend-k8s-priority-class"),
-				PodLabels:                   make(map[string]string), // just init empty map to prevent nil panic
-				PodLabelsAllowFromStep:      c.Bool("backend-k8s-pod-labels-allow-from-step"),
-				PodAnnotations:              make(map[string]string), // just init empty map to prevent nil panic
-				PodAnnotationsAllowFromStep: c.Bool("backend-k8s-pod-annotations-allow-from-step"),
-				PodTolerationsAllowFromStep: c.Bool("backend-k8s-pod-tolerations-allow-from-step"),
-				PodNodeSelector:             make(map[string]string), // just init empty map to prevent nil panic
-				PodAffinityAllowFromStep:    c.Bool("backend-k8s-pod-affinity-allow-from-step"),
-				ImagePullSecretNames:        c.StringSlice("backend-k8s-pod-image-pull-secret-names"),
+				Namespace:                    c.String("backend-k8s-namespace"),
+				EnableNamespacePerOrg:        c.Bool("backend-k8s-namespace-per-org"),
+				ClusterDomain:                c.String("backend-k8s-cluster-domain"),
+				StorageClass:                 c.String("backend-k8s-storage-class"),
+				VolumeSize:                   c.String("backend-k8s-volume-size"),
+				StorageRwx:                   c.Bool("backend-k8s-storage-rwx"),
+				PriorityClassName:            c.String("backend-k8s-priority-class"),
+				PodLabels:                    make(map[string]string), // just init empty map to prevent nil panic
+				PodLabelsAllowFromStep:       c.Bool("backend-k8s-pod-labels-allow-from-step"),
+				PodAnnotations:               make(map[string]string), // just init empty map to prevent nil panic
+				PodAnnotationsAllowFromStep:  c.Bool("backend-k8s-pod-annotations-allow-from-step"),
+				PodTolerationsAllowFromStep:  c.Bool("backend-k8s-pod-tolerations-allow-from-step"),
+				PodNodeSelectorAllowFromStep: c.Bool("backend-k8s-pod-node-selector-allow-from-step"),
+				PodNodeSelector:              make(map[string]string), // just init empty map to prevent nil panic
+				PodAffinityAllowFromStep:     c.Bool("backend-k8s-pod-affinity-allow-from-step"),
+				RuntimeClassAllowFromStep:    c.Bool("backend-k8s-runtime-class-allow-from-step"),
+				ImagePullSecretNames:         c.StringSlice("backend-k8s-pod-image-pull-secret-names"),
 				SecurityContext: SecurityContextConfig{
-					RunAsNonRoot: c.Bool("backend-k8s-secctx-nonroot"), // cspell:words secctx nonroot
-					FSGroup:      newInt64(defaultFSGroup),
+					RunAsNonRoot:                    c.Bool("backend-k8s-secctx-nonroot"), // cspell:words secctx nonroot
+					FSGroup:                         newInt64(defaultFSGroup),
+					OverrideNonRootInUserNamespaces: c.Bool("backend-k8s-user-namespaces-override-secctx-nonroot"), // cspell:words secctx nonroot
 				},
+				EnableUserNamespaces:            c.Bool("backend-k8s-user-namespaces"),
 				NativeSecretsAllowFromStep:      c.Bool("backend-k8s-allow-native-secrets"),
 				ServiceAccountNameAllowFromStep: c.Bool("backend-k8s-service-account-name-allow-from-step"),
 				StopTimeout:                     c.Int64("backend-k8s-stop-timeout"),
@@ -241,6 +252,9 @@ func (e *kube) SetupWorkflow(ctx context.Context, conf *types.Config, taskUUID s
 		}
 	}
 
+	// drop local filesystem volumes inside the workspace, Kubernetes cannot mount host paths
+	dropLocalPathsInsideWorkspace(conf)
+
 	log.Trace().Str("taskUUID", taskUUID).Msgf("Creating workflow volume")
 	_, err := startVolume(ctx, e, conf.Volume, namespace)
 	if err != nil {
@@ -260,7 +274,7 @@ func (e *kube) SetupWorkflow(ctx context.Context, conf *types.Config, taskUUID s
 func (e *kube) StartStep(ctx context.Context, step *types.Step, taskUUID string) error {
 	options, err := parseBackendOptions(step)
 	if err != nil {
-		log.Error().Err(err).Msg("could not parse backend options")
+		return fmt.Errorf("could not parse backend options: %w", err)
 	}
 
 	if needsRegistrySecret(step) {
@@ -294,15 +308,23 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 
 	finished := make(chan struct{})
 	var finishedOnce sync.Once
+	// Keep a termination observed by the informer if the API pod later disappears.
+	var observedPod atomic.Pointer[kube_core_v1.Pod]
+	rememberTermination := func(pod *kube_core_v1.Pod) {
+		if len(pod.Status.ContainerStatuses) > 0 && pod.Status.ContainerStatuses[0].State.Terminated != nil {
+			observedPod.CompareAndSwap(nil, pod.DeepCopy())
+		}
+	}
 
-	podUpdated := func(_, newPod any) {
-		pod, ok := newPod.(*kube_core_v1.Pod)
+	podChanged := func(obj any) {
+		pod, ok := obj.(*kube_core_v1.Pod)
 		if !ok {
-			log.Error().Msgf("could not parse pod: %v", newPod)
+			log.Error().Msgf("could not parse pod: %v", obj)
 			return
 		}
 
 		if pod.Name == podName {
+			rememberTermination(pod)
 			if isImagePullBackOffState(pod) || isInvalidImageName(pod) {
 				finishedOnce.Do(func() { close(finished) })
 			}
@@ -327,17 +349,22 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 			}
 		}
 		if pod.Name == podName {
+			rememberTermination(pod)
 			finishedOnce.Do(func() { close(finished) })
 		}
 	}
 
 	si := informers.NewSharedInformerFactoryWithOptions(e.client, defaultResyncDuration, informers.WithNamespace(e.config.GetNamespace(step.OrgID)))
-	if _, err := si.Core().V1().Pods().Informer().AddEventHandler(
+	podInformer := si.Core().V1().Pods().Informer()
+	handler, err := podInformer.AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
-			UpdateFunc: podUpdated,
+			// A pod already terminal at the initial List only produces an Add event.
+			AddFunc:    podChanged,
+			UpdateFunc: func(_, newPod any) { podChanged(newPod) },
 			DeleteFunc: podDeleted,
 		},
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
 
@@ -345,10 +372,19 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 	si.Start(stop)
 	defer close(stop)
 
-	// If the pod was deleted before the informer started, no events will
+	// Wait for initial Add handlers too, so an observed termination is retained
+	// before the guard Get can report that the pod has disappeared.
+	if !cache.WaitForCacheSync(ctx.Done(), handler.HasSynced) {
+		return nil, ctx.Err()
+	}
+
+	// If the pod was deleted before the informer synced, no events will
 	// ever arrive. Check explicitly so we don't hang forever.
-	if _, err := e.client.CoreV1().Pods(e.config.GetNamespace(step.OrgID)).Get(ctx, podName, kube_meta_v1.GetOptions{}); kube_errors.IsNotFound(err) {
-		return &types.State{ExitCode: 0, Exited: true}, nil
+	pod, err := e.client.CoreV1().Pods(e.config.GetNamespace(step.OrgID)).Get(ctx, podName, kube_meta_v1.GetOptions{})
+	if err == nil {
+		rememberTermination(pod)
+	} else if kube_errors.IsNotFound(err) && observedPod.Load() == nil {
+		return nil, err
 	}
 
 	select {
@@ -360,12 +396,15 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 	// After the informer signals completion, kubelet may not have finalized
 	// containerStatuses yet (phase=Succeeded before state.terminated is set).
 	// Retry with backoff to allow kubelet to catch up.
-	pod, err := backoff.Retry(
+	pod, err = backoff.Retry(
 		ctx,
 		func() (*kube_core_v1.Pod, error) {
 			p, err := e.client.CoreV1().Pods(e.config.GetNamespace(step.OrgID)).Get(ctx, podName, kube_meta_v1.GetOptions{})
 			if err != nil {
 				if kube_errors.IsNotFound(err) {
+					if observed := observedPod.Load(); observed != nil {
+						return observed, nil
+					}
 					return nil, backoff.Permanent(err)
 				}
 				return nil, err
@@ -385,9 +424,6 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 		}),
 	)
 	if err != nil {
-		if kube_errors.IsNotFound(backoff.AsRetryError(err).LastErr) {
-			return &types.State{ExitCode: 0, Exited: true}, nil
-		}
 		return nil, err
 	}
 
@@ -401,6 +437,11 @@ func (e *kube) WaitStep(ctx context.Context, step *types.Step, taskUUID string) 
 		ExitCode:  int(cs.State.Terminated.ExitCode),
 		Exited:    true,
 		OOMKilled: false,
+	}
+
+	// https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/#exceed-a-container-s-memory-limit
+	if cs.State.Terminated.Reason == "OOMKilled" {
+		bs.OOMKilled = true
 	}
 
 	return bs, nil

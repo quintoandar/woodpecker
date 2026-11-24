@@ -39,7 +39,7 @@ import (
 //	@Param			page			query	int		false	"for response pagination, page offset number"	default(1)
 //	@Param			perPage			query	int		false	"for response pagination, max items per page"	default(50)
 func GetOrgs(c *gin.Context) {
-	orgs, err := store.FromContext(c).OrgList(session.Pagination(c))
+	orgs, err := store.FromContext(c).OrgList(session.Pagination(c).All())
 	if err != nil {
 		c.String(http.StatusInternalServerError, "Error getting user list. %s", err)
 		return
@@ -74,6 +74,11 @@ func GetOrgPermissions(c *gin.Context) {
 	user := session.User(c)
 	org := session.Org(c)
 
+	if user == nil {
+		c.JSON(http.StatusOK, &model.OrgPerm{})
+		return
+	}
+
 	_forge, err := server.Config.Services.Manager.ForgeFromUser(user)
 	if err != nil {
 		log.Error().Err(err).Msg("Cannot get forge from user")
@@ -81,18 +86,20 @@ func GetOrgPermissions(c *gin.Context) {
 		return
 	}
 
-	if user == nil {
-		c.JSON(http.StatusOK, &model.OrgPerm{})
-		return
-	}
-
-	if (org.IsUser && org.Name == user.Login) || (user.Admin && !org.IsUser) {
+	if (org.IsUser && org.Name == user.Login && org.ForgeID == user.ForgeID) || (user.Admin && !org.IsUser) {
 		c.JSON(http.StatusOK, &model.OrgPerm{
 			Member: true,
 			Admin:  true,
 		})
 		return
 	} else if org.IsUser {
+		c.JSON(http.StatusOK, &model.OrgPerm{})
+		return
+	}
+
+	// orgs of other forges can share a name with orgs of the user's forge,
+	// so a membership looked up on the user's forge proves nothing about them
+	if org.ForgeID != user.ForgeID {
 		c.JSON(http.StatusOK, &model.OrgPerm{})
 		return
 	}
@@ -169,6 +176,38 @@ func LookupOrg(c *gin.Context) {
 				return
 			}
 		}
+	}
+
+	c.JSON(http.StatusOK, org)
+}
+
+// PatchOrg
+//
+//	@Summary	Update an organization
+//	@Router		/orgs/{org_id} [patch]
+//	@Produce	json
+//	@Success	200	{object}	Org
+//	@Tags		Organization
+//	@Param		Authorization	header	string		true	"Insert your personal access token"	default(Bearer <personal access token>)
+//	@Param		org_id			path	string		true	"the organization's id"
+//	@Param		org				body	OrgPatch	true	"the org's updated data"
+func PatchOrg(c *gin.Context) {
+	_store := store.FromContext(c)
+	org := session.Org(c)
+
+	in := new(model.OrgPatch)
+	if err := c.Bind(in); err != nil {
+		_ = c.AbortWithError(http.StatusBadRequest, err)
+		return
+	}
+
+	if in.RequireOrgAgents != nil {
+		org.RequireOrgAgents = *in.RequireOrgAgents
+	}
+
+	if err := _store.OrgUpdate(org); err != nil {
+		handleDBError(c, err)
+		return
 	}
 
 	c.JSON(http.StatusOK, org)

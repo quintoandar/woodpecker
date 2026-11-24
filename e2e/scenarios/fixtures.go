@@ -76,12 +76,18 @@ type ExpectedStep struct {
 	Name     string            `json:"name"`
 	Status   model.StatusValue `json:"status"`
 	ExitCode int               `json:"exit_code"`
+	// Error must be contained in the error stored for the step, as runtime
+	// errors embed the random step UUID. Empty means no error is stored.
+	Error string `json:"error"`
 }
 
 // ExpectedWorkflow describes what we expect for one named workflow after the pipeline finishes.
 type ExpectedWorkflow struct {
 	Name   string            `json:"name"`
 	Status model.StatusValue `json:"status"`
+	// Error is the runtime error reported by the agent. A failing step must not
+	// produce one, so it is empty for everything but real runtime failures.
+	Error string `json:"error"`
 }
 
 // LoadScenarios reads all fixture pairs and subdirectories from the embedded

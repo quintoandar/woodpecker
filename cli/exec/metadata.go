@@ -51,9 +51,9 @@ func metadataFromContext(_ context.Context, c *cli.Command, axis matrix.Axis) (*
 	}
 
 	metadataFileAndOverrideOrDefault(c, "repo-name", func(fullRepoName string) {
-		if idx := strings.LastIndex(fullRepoName, "/"); idx != -1 {
-			m.Repo.Owner = fullRepoName[:idx]
-			m.Repo.Name = fullRepoName[idx+1:]
+		if owner, name, found := strings.CutLast(fullRepoName, "/"); found {
+			m.Repo.Owner = owner
+			m.Repo.Name = name
 		}
 	}, c.String)
 
@@ -65,7 +65,7 @@ func metadataFromContext(_ context.Context, c *cli.Command, axis matrix.Axis) (*
 				err = fmt.Errorf("pipeline-changed-files detected json but could not parse it: %w", jsonErr)
 			}
 		} else {
-			for _, file := range strings.Split(changedFilesRaw, ",") {
+			for file := range strings.SplitSeq(changedFilesRaw, ",") {
 				changedFiles = append(changedFiles, strings.TrimSpace(file))
 			}
 		}
@@ -76,6 +76,7 @@ func metadataFromContext(_ context.Context, c *cli.Command, axis matrix.Axis) (*
 	}
 
 	// Repo
+	metadataFileAndOverrideOrDefault(c, "repo-id", func(id int64) { m.Repo.ID = id }, c.Int64)
 	metadataFileAndOverrideOrDefault(c, "repo-remote-id", func(s string) { m.Repo.RemoteID = s }, c.String)
 	metadataFileAndOverrideOrDefault(c, "repo-url", func(s string) { m.Repo.ForgeURL = s }, c.String)
 	metadataFileAndOverrideOrDefault(c, "repo-default-branch", func(s string) { m.Repo.Branch = s }, c.String)
@@ -98,6 +99,10 @@ func metadataFromContext(_ context.Context, c *cli.Command, axis matrix.Axis) (*
 	metadataFileAndOverrideOrDefault(c, "pipeline-deploy-to", func(s string) { m.Curr.DeployTo = s }, c.String)
 	metadataFileAndOverrideOrDefault(c, "pipeline-deploy-task", func(s string) { m.Curr.DeployTask = s }, c.String)
 
+	// Current Pipeline Release
+	metadataFileAndOverrideOrDefault(c, "pipeline-release", func(s string) { m.Curr.Release.Title = s }, c.String)
+	metadataFileAndOverrideOrDefault(c, "commit-release-is-pre", func(b bool) { m.Curr.Release.IsPrerelease = b }, c.Bool)
+
 	// Current Pipeline Commit
 	metadataFileAndOverrideOrDefault(c, "commit-sha", func(s string) { m.Curr.Commit.Sha = s }, c.String)
 	metadataFileAndOverrideOrDefault(c, "commit-ref", func(s string) { m.Curr.Commit.Ref = s }, c.String)
@@ -113,7 +118,6 @@ func metadataFromContext(_ context.Context, c *cli.Command, axis matrix.Axis) (*
 	metadataFileAndOverrideOrDefault(c, "commit-pull-labels", func(sl []string) { m.Curr.Commit.PullRequestLabels = sl }, c.StringSlice)
 	metadataFileAndOverrideOrDefault(c, "commit-pull-milestone", func(s string) { m.Curr.Commit.PullRequestMilestone = s }, c.String)
 	metadataFileAndOverrideOrDefault(c, "commit-pull-draft", func(b bool) { m.Curr.Commit.PullRequestDraft = b }, c.Bool)
-	metadataFileAndOverrideOrDefault(c, "commit-release-is-pre", func(b bool) { m.Curr.Commit.IsPrerelease = b }, c.Bool)
 
 	// Previous Pipeline
 	metadataFileAndOverrideOrDefault(c, "prev-pipeline-number", func(i int64) { m.Prev.Number = i }, c.Int64)

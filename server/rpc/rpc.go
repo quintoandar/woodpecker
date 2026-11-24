@@ -57,7 +57,6 @@ type RPC struct {
 }
 
 // Next blocks until it provides the next workflow to execute.
-// TODO (6038): Server does not release waiting agents on graceful shutdown.
 func (s *RPC) Next(c context.Context, agentFilter rpc.Filter) (*rpc.Workflow, error) {
 	if hostname, err := s.getHostnameFromContext(c); err == nil {
 		log.Debug().Msgf("agent connected: %s: polling", hostname)
@@ -79,6 +78,9 @@ func (s *RPC) Next(c context.Context, agentFilter rpc.Filter) (*rpc.Workflow, er
 	}
 
 	// enforce labels from server by overwriting agent labels
+	if agentFilter.Labels == nil {
+		agentFilter.Labels = make(map[string]string)
+	}
 	maps.Copy(agentFilter.Labels, agentServerLabels)
 
 	log.Trace().Msgf("Agent %s[%d] tries to pull task with labels: %v", agent.Name, agent.ID, agentFilter.Labels)
@@ -214,7 +216,7 @@ func (s *RPC) Update(c context.Context, strWorkflowID string, state rpc.StepStat
 		(step.State == model.StatusFailure ||
 			step.State == model.StatusKilled ||
 			step.State == model.StatusError) {
-		metric.FailurePipelineStepInfoCount.WithLabelValues(workflow.Name, repo.FullName, step.Name).Inc()
+		metric.FailurePipelineStepInfoCount.WithLabelValues(workflow.Name, repo.FullName, step.Name, string(step.Type)).Inc()
 	}
 
 	if metric.StepDurationRecord != nil && state.Exited && step.Started > 0 && step.Finished >= step.Started {
@@ -223,10 +225,13 @@ func (s *RPC) Update(c context.Context, strWorkflowID string, state rpc.StepStat
 			workflow.Name,
 			repo.FullName,
 			step.Name,
+			string(step.Type),
 		).Observe(float64(duration))
 	}
 	if state.Exited {
-		server.Config.Services.LogStore.StepFinished(step)
+		if err := server.Config.Services.LogStore.StepFinished(c, step); err != nil {
+			log.Error().Err(err).Int64("step", step.ID).Msg("log store could not finalize the step log")
+		}
 	}
 
 	if currentPipeline.Workflows, err = s.store.WorkflowGetTree(currentPipeline); err != nil {
@@ -274,6 +279,11 @@ func (s *RPC) Init(c context.Context, strWorkflowID string, state rpc.WorkflowSt
 
 	// check workflow's own state to prevent re-initializing a finished or blocked workflow
 	if err := checkWorkflowState(workflow.State); err != nil {
+		return err
+	}
+
+	// sanitize agent input: reject states no compatible agent can produce
+	if err := checkAgentReportedInitState(agent.ID, state); err != nil {
 		return err
 	}
 
@@ -347,6 +357,11 @@ func (s *RPC) Done(c context.Context, strWorkflowID string, state rpc.WorkflowSt
 		return err
 	}
 
+	// sanitize agent input: reject states no compatible agent can produce
+	if err := checkAgentReportedDoneState(agent.ID, state); err != nil {
+		return err
+	}
+
 	logger := log.With().
 		Str("repo_id", fmt.Sprint(repo.ID)).
 		Str("pipeline_id", fmt.Sprint(currentPipeline.ID)).
@@ -387,7 +402,16 @@ func (s *RPC) Done(c context.Context, strWorkflowID string, state rpc.WorkflowSt
 	}
 
 	if !model.IsThereRunningStage(currentPipeline.Workflows) {
-		if currentPipeline, err = pipeline.UpdateStatusToDone(s.store, *currentPipeline, pipeline.PipelineStatus(currentPipeline.Workflows), workflow.Finished); err != nil {
+		// use the latest finish time of all workflows
+		finished := workflow.Finished
+		for _, w := range currentPipeline.Workflows {
+			finished = max(finished, w.Finished)
+		}
+		if finished == 0 {
+			finished = time.Now().Unix()
+		}
+
+		if currentPipeline, err = pipeline.UpdateStatusToDone(s.store, *currentPipeline, pipeline.PipelineStatus(currentPipeline.Workflows), finished); err != nil {
 			logger.Error().Err(err).Msgf("pipeline.UpdateStatusToDone: cannot update workflows final state")
 		}
 	}
@@ -399,7 +423,12 @@ func (s *RPC) Done(c context.Context, strWorkflowID string, state rpc.WorkflowSt
 		for _, step := range workflow.Children {
 			if step.State != model.StatusSkipped {
 				if err := s.logger.Close(c, step.ID); err != nil {
-					logger.Error().Err(err).Msgf("done: cannot close log stream for step %d", step.ID)
+					// A step killed before it ran never opened a stream.
+					if errors.Is(err, logging.ErrNotFound) {
+						logger.Debug().Err(err).Msgf("done: no log stream to close for step %d", step.ID)
+					} else {
+						logger.Error().Err(err).Msgf("done: cannot close log stream for step %d", step.ID)
+					}
 				}
 			}
 		}
@@ -478,7 +507,7 @@ func (s *RPC) Log(c context.Context, stepUUID string, rpcLogEntries []*rpc.LogEn
 		}
 	}()
 
-	if err = server.Config.Services.LogStore.LogAppend(step, logEntries); err != nil {
+	if err = server.Config.Services.LogStore.LogAppend(c, step, logEntries); err != nil {
 		log.Error().Err(err).Msg("could not store log entries")
 	}
 

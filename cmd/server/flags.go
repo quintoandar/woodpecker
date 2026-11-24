@@ -75,6 +75,11 @@ var flags = append([]cli.Flag{
 		Value:   ":8000",
 	},
 	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_UNIX_SOCKET_PERMISSION"),
+		Name:    "unix-socket-permission",
+		Usage:   "file mode for the HTTP unix socket, for example 660 or 666",
+	},
+	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_SERVER_ADDR_TLS"),
 		Name:    "server-addr-tls",
 		Usage:   "port https with tls (:443)",
@@ -124,7 +129,7 @@ var flags = append([]cli.Flag{
 		),
 		Name:  "grpc-secret",
 		Usage: "grpc jwt secret",
-		Value: "secret",
+		Value: "",
 		Config: cli.StringConfig{
 			TrimSpace: true,
 		},
@@ -184,7 +189,7 @@ var flags = append([]cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_DEFAULT_APPROVAL_MODE"),
 		Name:    "default-approval-mode",
-		Usage:   "The default value for allowing pull requests on a repo.",
+		Usage:   "The default approval mode on a repo: none, forks, pull_requests or all_events.",
 		Value:   "forks",
 	},
 	&cli.StringSliceFlag{
@@ -459,7 +464,7 @@ var flags = append([]cli.Flag{
 		Sources: cli.EnvVars("WOODPECKER_FORGE_TIMEOUT"),
 		Name:    "forge-timeout",
 		Usage:   "how many seconds before timeout when fetching the Woodpecker configuration from a Forge",
-		Value:   time.Second * 15,
+		Value:   time.Second * 30,
 	},
 	&cli.UintFlag{
 		Sources: cli.EnvVars("WOODPECKER_FORGE_RETRY"),

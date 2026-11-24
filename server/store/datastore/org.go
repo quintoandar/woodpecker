@@ -25,7 +25,11 @@ import (
 )
 
 func (s storage) OrgCreate(org *model.Org) error {
-	return s.orgCreate(org, s.engine.NewSession())
+	return retryWrite(func() error {
+		sess := s.engine.NewSession()
+		defer sess.Close()
+		return s.orgCreate(org, sess)
+	})
 }
 
 func (s storage) orgCreate(org *model.Org, sess *xorm.Session) error {
@@ -41,17 +45,22 @@ func (s storage) OrgGet(id int64) (*model.Org, error) {
 }
 
 func (s storage) OrgUpdate(org *model.Org) error {
-	return s.orgUpdate(s.engine.NewSession(), org)
+	return retryWrite(func() error {
+		sess := s.engine.NewSession()
+		defer sess.Close()
+		return s.orgUpdate(sess, org)
+	})
 }
 
 func (s storage) orgUpdate(sess *xorm.Session, org *model.Org) error {
 	// update
-	_, err := sess.ID(org.ID).AllCols().Update(org)
-	return err
+	return wrapUpdate(sess.ID(org.ID).AllCols().Update(org))
 }
 
 func (s storage) OrgDelete(id int64) error {
-	return s.orgDelete(s.engine.NewSession(), id)
+	return retryWrite(func() error {
+		return s.orgDelete(s.engine.NewSession(), id)
+	})
 }
 
 func (s storage) orgDelete(sess *xorm.Session, id int64) error {
@@ -99,12 +108,12 @@ func (s storage) OrgLookup(name string) (*model.Org, error) {
 	return orgs[0], nil
 }
 
-func (s storage) OrgRepoList(org *model.Org, p *model.ListOptions) ([]*model.Repo, error) {
+func (s storage) OrgRepoList(org *model.Org, p *model.ListOptionsWithAll) ([]*model.Repo, error) {
 	var repos []*model.Repo
 	return repos, s.paginate(p).OrderBy("id").Where("org_id = ?", org.ID).Find(&repos)
 }
 
-func (s storage) OrgList(p *model.ListOptions) ([]*model.Org, error) {
+func (s storage) OrgList(p *model.ListOptionsWithAll) ([]*model.Org, error) {
 	var orgs []*model.Org
 	return orgs, s.paginate(p).Where("is_user = ?", false).OrderBy("id").Find(&orgs)
 }
