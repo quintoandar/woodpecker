@@ -5,16 +5,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
+# upstream test helpers are behind the `test` build tag (see Makefile test-server)
+GT=(go test -tags test -count=1)
+
 echo "==> GraphQL config dir tests"
-go test ./server/forge/github/ -run 'TestDirGraphQL|TestGraphQLEndpoint' -count=1
+"${GT[@]}" ./server/forge/github/ -run 'TestDirGraphQL|TestGraphQLEndpoint'
 
 echo "==> GitHub forge package"
-go test ./server/forge/github/ -count=1
+"${GT[@]}" ./server/forge/github/
 
 echo "==> RPC Log (no LastWork on log lines)"
-go test ./server/rpc/ -run 'Log' -count=1 2>/dev/null || go test ./server/rpc/ -count=1
+"${GT[@]}" ./server/rpc/ -run 'Log'
 
 echo "==> Hook handler (upstream async ack; no fork duplicate)"
-go test ./server/api/ -run 'Hook' -count=1
+"${GT[@]}" ./server/api/ -run 'Hook'
 
 echo "OK: staging validation tests passed."
