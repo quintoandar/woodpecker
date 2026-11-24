@@ -20,14 +20,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMergeSlices(t *testing.T) {
-	resultSS := MergeSlices([]string{}, []string{"a", "b"}, []string{"c"}, nil)
-	assert.EqualValues(t, []string{"a", "b", "c"}, resultSS)
-
-	resultIS := MergeSlices([]int{}, []int{1, 2}, []int{4}, nil)
-	assert.EqualValues(t, []int{1, 2, 4}, resultIS)
-}
-
 func TestEqualSliceValues(t *testing.T) {
 	tests := []struct {
 		in1 []string
@@ -51,8 +43,8 @@ func TestEqualSliceValues(t *testing.T) {
 		out: false,
 	}}
 
-	for _, tc := range tests {
-		assert.EqualValues(t, tc.out, EqualSliceValues(tc.in1, tc.in2), "could not correctly process input: '%#v', %#v", tc.in1, tc.in2)
+	for _, tt := range tests {
+		assert.EqualValues(t, tt.out, EqualSliceValues(tt.in1, tt.in2), "could not correctly process input: '%#v', %#v", tt.in1, tt.in2)
 	}
 
 	assert.True(t, EqualSliceValues([]bool{true, false, false}, []bool{false, false, true}))
@@ -65,8 +57,8 @@ func TestSliceToBoolMap(t *testing.T) {
 		"b": true,
 		"c": true,
 	}, SliceToBoolMap([]string{"a", "b", "c"}))
-	assert.Equal(t, map[string]bool{}, SliceToBoolMap([]string{}))
-	assert.Equal(t, map[string]bool{}, SliceToBoolMap([]string{""}))
+	assert.Equal(t, make(map[string]bool), SliceToBoolMap([]string{}))
+	assert.Equal(t, make(map[string]bool), SliceToBoolMap([]string{""}))
 }
 
 func TestStringSliceDeleteEmpty(t *testing.T) {
@@ -84,8 +76,8 @@ func TestStringSliceDeleteEmpty(t *testing.T) {
 		out: []string{},
 	}}
 
-	for _, tc := range tests {
-		exp := StringSliceDeleteEmpty(tc.in)
-		assert.EqualValues(t, tc.out, exp, "got '%#v', expects %#v", exp, tc.out)
+	for _, tt := range tests {
+		exp := StringSliceDeleteEmpty(tt.in)
+		assert.EqualValues(t, tt.out, exp, "got '%#v', expects %#v", exp, tt.out)
 	}
 }

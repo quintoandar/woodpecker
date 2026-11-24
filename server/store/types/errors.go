@@ -14,6 +14,18 @@
 
 package types
 
-import "database/sql"
+import (
+	"database/sql"
+	"errors"
+)
 
-var RecordNotExist = sql.ErrNoRows
+var (
+	// RecordNotExist a Get or Update could not find the requested record.
+	ErrRecordNotExist = sql.ErrNoRows
+
+	// ErrInsertDuplicateDetected is returned when an insert fails because of unique constrains.
+	ErrInsertDuplicateDetected = errors.New("on insert duplicate based on constraints was detected")
+
+	// ErrDatabaseLocked is returned when an operation failed because the database is locked (usually a transitory state).
+	ErrDatabaseLocked = errors.New("database is locked")
+)

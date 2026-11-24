@@ -9,6 +9,9 @@
       />
       <Button v-else :text="$t('admin.settings.agents.add')" start-icon="plus" @click="showAddAgent" />
     </template>
+    <template v-if="$slots.headerEnd" #headerEnd>
+      <slot name="headerEnd" />
+    </template>
 
     <AgentList
       v-if="!selectedAgent"
@@ -31,7 +34,6 @@
 </template>
 
 <script lang="ts" setup>
-import { cloneDeep } from 'lodash';
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 
@@ -41,6 +43,7 @@ import { useAsyncAction } from '~/compositions/useAsyncAction';
 import useNotifications from '~/compositions/useNotifications';
 import { usePagination } from '~/compositions/usePaginate';
 import type { Agent } from '~/lib/api/types';
+import { deepClone } from '~/lib/utils';
 
 import AgentForm from './AgentForm.vue';
 import AgentList from './AgentList.vue';
@@ -92,7 +95,7 @@ const { doSubmit: deleteAgent, isLoading: isDeleting } = useAsyncAction(async (_
 });
 
 function editAgent(agent: Agent) {
-  selectedAgent.value = cloneDeep(agent);
+  selectedAgent.value = deepClone(agent);
 }
 
 function showAddAgent() {

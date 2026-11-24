@@ -1,3 +1,17 @@
+// Copyright 2025 Woodpecker Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package kubernetes
 
 import (
@@ -6,9 +20,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	kube_core_v1 "k8s.io/api/core/v1"
+	kube_errors "k8s.io/apimachinery/pkg/api/errors"
+	kube_meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -17,20 +31,20 @@ type mockNamespaceClient struct {
 	createError  error
 	getCalled    bool
 	createCalled bool
-	createdNS    *v1.Namespace
+	createdNS    *kube_core_v1.Namespace
 }
 
-func (m *mockNamespaceClient) Get(_ context.Context, name string, _ metav1.GetOptions) (*v1.Namespace, error) {
+func (m *mockNamespaceClient) Get(_ context.Context, name string, _ kube_meta_v1.GetOptions) (*kube_core_v1.Namespace, error) {
 	m.getCalled = true
 	if m.getError != nil {
 		return nil, m.getError
 	}
-	return &v1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
+	return &kube_core_v1.Namespace{
+		Name: name,
 	}, nil
 }
 
-func (m *mockNamespaceClient) Create(_ context.Context, ns *v1.Namespace, _ metav1.CreateOptions) (*v1.Namespace, error) {
+func (m *mockNamespaceClient) Create(_ context.Context, ns *kube_core_v1.Namespace, _ kube_meta_v1.CreateOptions) (*kube_core_v1.Namespace, error) {
 	m.createCalled = true
 	m.createdNS = ns
 	return ns, m.createError
@@ -41,7 +55,7 @@ func TestMkNamespace(t *testing.T) {
 		name               string
 		namespace          string
 		setupMock          func(*mockNamespaceClient)
-		expectError        bool
+		wantErr            bool
 		errorContains      string
 		expectGetCalled    bool
 		expectCreateCalled bool
@@ -52,7 +66,7 @@ func TestMkNamespace(t *testing.T) {
 			setupMock: func(m *mockNamespaceClient) {
 				m.getError = nil // namespace exists
 			},
-			expectError:        false,
+			wantErr:            false,
 			expectGetCalled:    true,
 			expectCreateCalled: false,
 		},
@@ -60,10 +74,10 @@ func TestMkNamespace(t *testing.T) {
 			name:      "should create namespace when it doesn't exist",
 			namespace: "new-namespace",
 			setupMock: func(m *mockNamespaceClient) {
-				m.getError = k8serrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "new-namespace")
+				m.getError = kube_errors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "new-namespace")
 				m.createError = nil
 			},
-			expectError:        false,
+			wantErr:            false,
 			expectGetCalled:    true,
 			expectCreateCalled: true,
 		},
@@ -73,7 +87,7 @@ func TestMkNamespace(t *testing.T) {
 			setupMock: func(m *mockNamespaceClient) {
 				m.getError = errors.New("api server unavailable")
 			},
-			expectError:        true,
+			wantErr:            true,
 			errorContains:      "api server unavailable",
 			expectGetCalled:    true,
 			expectCreateCalled: false,
@@ -82,10 +96,10 @@ func TestMkNamespace(t *testing.T) {
 			name:      "should fail when Create namespace returns error",
 			namespace: "create-fail-namespace",
 			setupMock: func(m *mockNamespaceClient) {
-				m.getError = k8serrors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "create-fail-namespace")
+				m.getError = kube_errors.NewNotFound(schema.GroupResource{Resource: "namespaces"}, "create-fail-namespace")
 				m.createError = errors.New("insufficient permissions")
 			},
-			expectError:        true,
+			wantErr:            true,
 			errorContains:      "insufficient permissions",
 			expectGetCalled:    true,
 			expectCreateCalled: true,
@@ -99,7 +113,7 @@ func TestMkNamespace(t *testing.T) {
 
 			err := mkNamespace(t.Context(), client, tt.namespace)
 
-			if tt.expectError {
+			if tt.wantErr {
 				assert.Error(t, err)
 				if tt.errorContains != "" {
 					assert.Contains(t, err.Error(), tt.errorContains)

@@ -16,25 +16,31 @@ package kubernetes
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/kinbiko/jsonassert"
 	"github.com/stretchr/testify/assert"
-	v1 "k8s.io/api/core/v1"
+	kube_core_v1 "k8s.io/api/core/v1"
+	kube_meta_v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/backend/types"
 )
+
+const taskUUID = "11301"
 
 func TestPodName(t *testing.T) {
 	name, err := podName(&types.Step{UUID: "01he8bebctabr3kgk0qj36d2me-0"})
 	assert.NoError(t, err)
 	assert.Equal(t, "wp-01he8bebctabr3kgk0qj36d2me-0", name)
 
-	_, err = podName(&types.Step{UUID: "01he8bebctabr3kgk0qj36d2me\\0a"})
-	assert.ErrorIs(t, err, ErrDNSPatternInvalid)
+	name, err = podName(&types.Step{UUID: "01he8bebctabr3kgk0qj36d2me\\0a"})
+	assert.NoError(t, err)
+	assert.Equal(t, "wp-01he8bebctabr3kgk0qj36d2me-0a", name)
 
-	_, err = podName(&types.Step{UUID: "01he8bebctabr3kgk0qj36d2me-0-services-0..woodpecker-runtime.svc.cluster.local"})
-	assert.ErrorIs(t, err, ErrDNSPatternInvalid)
+	name, err = podName(&types.Step{UUID: "01he8bebctabr3kgk0qj36d2me-0-services-0..woodpecker-runtime.svc.cluster.local"})
+	assert.NoError(t, err)
+	assert.Equal(t, "wp-01he8bebctabr3kgk0qj36d2me-0-services-0.woodpecker-runtime.svc.cluster.local", name)
 }
 
 func TestStepToPodName(t *testing.T) {
@@ -50,11 +56,11 @@ func TestStepToPodName(t *testing.T) {
 	name, err = stepToPodName(&types.Step{UUID: "01he8bebctabr3kg", Name: "prepare-env", Type: types.StepTypeCommands})
 	assert.NoError(t, err)
 	assert.EqualValues(t, "wp-01he8bebctabr3kg", name)
-	name, err = stepToPodName(&types.Step{UUID: "01he8bebctabr3kg", Name: "postgres", Type: types.StepTypeService})
+	name, err = stepToPodName(&types.Step{UUID: "01he8bebctabr3kg", Name: "postgres", Type: types.StepTypeService, Ports: []types.Port{{Number: 5432}}})
 	assert.NoError(t, err)
 	assert.EqualValues(t, "wp-svc-01he8bebctabr3kg-postgres", name)
-	// Detached service
-	name, err = stepToPodName(&types.Step{UUID: "01he8bebctabr3kg", Name: "postgres", Detached: true})
+	// Service
+	name, err = stepToPodName(&types.Step{UUID: "01he8bebctabr3kg", Name: "postgres", Detached: true, Type: types.StepTypeService, Ports: []types.Port{{Number: 5432}}})
 	assert.NoError(t, err)
 	assert.EqualValues(t, "wp-svc-01he8bebctabr3kg-postgres", name)
 	// Detached long running container
@@ -71,23 +77,27 @@ func TestPodMeta(t *testing.T) {
 		Image:       "postgres:16",
 		WorkingDir:  "/woodpecker/src",
 		Environment: map[string]string{"CI": "woodpecker"},
+		Ports:       []types.Port{{Number: 5432}},
 	}, &config{
 		Namespace: "woodpecker",
-	}, BackendOptions{}, "wp-01he8bebctabr3kg-0")
+	}, BackendOptions{}, "wp-01he8bebctabr3kg-0", taskUUID)
 	assert.NoError(t, err)
 	assert.EqualValues(t, "wp-svc-01he8bebctabr3kg-postgres", meta.Labels[ServiceLabel])
+	assert.EqualValues(t, taskUUID, meta.Labels[TaskUUIDLabel])
 
-	// Detached service
+	// Service
 	meta, err = podMeta(&types.Step{
 		Name:        "postgres",
 		UUID:        "01he8bebctabr3kg",
 		Detached:    true,
+		Type:        types.StepTypeService,
 		Image:       "postgres:16",
 		WorkingDir:  "/woodpecker/src",
 		Environment: map[string]string{"CI": "woodpecker"},
+		Ports:       []types.Port{{Number: 5432}},
 	}, &config{
 		Namespace: "woodpecker",
-	}, BackendOptions{}, "wp-01he8bebctabr3kg-0")
+	}, BackendOptions{}, "wp-01he8bebctabr3kg-0", taskUUID)
 	assert.NoError(t, err)
 	assert.EqualValues(t, "wp-svc-01he8bebctabr3kg-postgres", meta.Labels[ServiceLabel])
 
@@ -101,18 +111,115 @@ func TestPodMeta(t *testing.T) {
 		Environment: map[string]string{"CI": "woodpecker"},
 	}, &config{
 		Namespace: "woodpecker",
-	}, BackendOptions{}, "wp-01he8bebctabr3kg-0")
+	}, BackendOptions{}, "wp-01he8bebctabr3kg-0", taskUUID)
 	assert.NoError(t, err)
 	assert.EqualValues(t, "", meta.Labels[ServiceLabel])
 }
 
-func TestStepLabel(t *testing.T) {
-	name, err := stepLabel(&types.Step{Name: "Build image"})
-	assert.NoError(t, err)
-	assert.EqualValues(t, "build-image", name)
+// TestStepNameAsLabel verifies that step names are correctly converted to valid
+// Kubernetes label values via toLabelValue (replaces the old stepLabel wrapper).
+func TestStepNameAsLabel(t *testing.T) {
+	tests := []struct {
+		name     string
+		stepName string
+		want     string
+	}{
+		{
+			name:     "spaces converted to dashes and lowercased",
+			stepName: "Build image",
+			want:     "build-image",
+		},
+		{
+			name:     "leading dot stripped",
+			stepName: ".build.image",
+			want:     "build.image",
+		},
+		{
+			name:     "simple lowercase name unchanged",
+			stepName: "test",
+			want:     "test",
+		},
+		{
+			name:     "underscores preserved",
+			stepName: "run_tests",
+			want:     "run_tests",
+		},
+		{
+			name:     "mixed special characters",
+			stepName: "Deploy (production)",
+			want:     "deploy-production",
+		},
+		{
+			name:     "consecutive spaces single dash",
+			stepName: "step   name",
+			want:     "step-name",
+		},
+	}
 
-	_, err = stepLabel(&types.Step{Name: ".build.image"})
-	assert.ErrorIs(t, err, ErrDNSPatternInvalid)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := toLabelValue(tt.stepName)
+			assert.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// TestStepNameAsLabelInPod verifies that step labels in a pod use toLabelValue
+// and produce valid values that Kubernetes accepts.
+func TestStepNameAsLabelInPod(t *testing.T) {
+	step := &types.Step{
+		Name:        "Build & Deploy (staging)",
+		Image:       "alpine:latest",
+		UUID:        "01he8bebctabr3kgk0qj36d2me-1",
+		WorkingDir:  "/woodpecker/src",
+		Environment: make(map[string]string),
+	}
+	meta, err := podMeta(step, &config{Namespace: "woodpecker"}, BackendOptions{}, "wp-01he8bebctabr3kgk0qj36d2me-1", taskUUID)
+	assert.NoError(t, err)
+	assert.Equal(t, "build-deploy-staging", meta.Labels[StepLabel])
+	assert.Equal(t, "build-deploy-staging", meta.Labels[StepLabelLegacy])
+}
+
+// TestStepNameAsLabelLongName verifies that long step names are truncated
+// to 63 characters (Kubernetes label value limit).
+func TestStepNameAsLabelLongName(t *testing.T) {
+	longName := strings.Repeat("a", 100)
+	got, err := toLabelValue(longName)
+	assert.NoError(t, err)
+	assert.LessOrEqual(t, len(got), 63)
+}
+
+func TestPodHostnameSanitized(t *testing.T) {
+	pod, err := mkPod(&types.Step{
+		Name:        "Update repos",
+		Image:       "alpine:latest",
+		UUID:        "01he8bebctabr3kgk0qj36d2me-1",
+		WorkingDir:  "/woodpecker/src",
+		Environment: make(map[string]string),
+	}, &config{Namespace: "woodpecker"}, "wp-01he8bebctabr3kgk0qj36d2me-1", "linux/amd64", BackendOptions{}, taskUUID)
+	assert.NoError(t, err)
+	assert.Equal(t, "update-repos", pod.Spec.Hostname)
+}
+
+func TestPodClusterDomain(t *testing.T) {
+	step := &types.Step{
+		Name:  "build",
+		Image: "alpine:latest",
+		UUID:  "01he8bebctabr3kgk0qj36d2me-0",
+	}
+
+	pod, err := mkPod(step, &config{
+		Namespace:     "woodpecker",
+		ClusterDomain: "k8s.example.com",
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{}, taskUUID)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"wp-hsvc-11301.woodpecker.svc.k8s.example.com"}, pod.Spec.DNSConfig.Searches)
+
+	// an unset cluster domain falls back to the Kubernetes default
+	pod, err = mkPod(step, &config{Namespace: "woodpecker"}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{}, taskUUID)
+	assert.NoError(t, err)
+	assert.Equal(t, []string{"wp-hsvc-11301.woodpecker.svc.cluster.local"}, pod.Spec.DNSConfig.Searches)
 }
 
 func TestTinyPod(t *testing.T) {
@@ -121,10 +228,10 @@ func TestTinyPod(t *testing.T) {
 		"metadata": {
 			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
 			"namespace": "woodpecker",
-			"creationTimestamp": null,
 			"labels": {
 				"step": "build-via-gradle",
-				"woodpecker-ci.org/step": "build-via-gradle"
+				"woodpecker-ci.org/step": "build-via-gradle",
+				"woodpecker-ci.org/task-uuid": "11301"
 			}
 		},
 		"spec": {
@@ -157,7 +264,7 @@ func TestTinyPod(t *testing.T) {
 						},
 						{
 							"name": "CI_SCRIPT",
-							"value": "CmlmIFsgLW4gIiRDSV9ORVRSQ19NQUNISU5FIiBdOyB0aGVuCmNhdCA8PEVPRiA+ICRIT01FLy5uZXRyYwptYWNoaW5lICRDSV9ORVRSQ19NQUNISU5FCmxvZ2luICRDSV9ORVRSQ19VU0VSTkFNRQpwYXNzd29yZCAkQ0lfTkVUUkNfUEFTU1dPUkQKRU9GCmNobW9kIDA2MDAgJEhPTUUvLm5ldHJjCmZpCnVuc2V0IENJX05FVFJDX1VTRVJOQU1FCnVuc2V0IENJX05FVFJDX1BBU1NXT1JECnVuc2V0IENJX1NDUklQVApta2RpciAtcCAiL3dvb2RwZWNrZXIvc3JjIgpjZCAiL3dvb2RwZWNrZXIvc3JjIgoKZWNobyArICdncmFkbGUgYnVpbGQnCmdyYWRsZSBidWlsZAo="
+							"value": "CmlmIFsgLW4gIiRDSV9ORVRSQ19NQUNISU5FIiBdOyB0aGVuCmNhdCA8PEVPRiA+ICRIT01FLy5uZXRyYwptYWNoaW5lICRDSV9ORVRSQ19NQUNISU5FCmxvZ2luICRDSV9ORVRSQ19VU0VSTkFNRQpwYXNzd29yZCAkQ0lfTkVUUkNfUEFTU1dPUkQKRU9GCmNobW9kIDA2MDAgJEhPTUUvLm5ldHJjCmZpCnVuc2V0IENJX05FVFJDX1VTRVJOQU1FCnVuc2V0IENJX05FVFJDX1BBU1NXT1JECnVuc2V0IENJX1NDUklQVApta2RpciAtcCAiL3dvb2RwZWNrZXIvc3JjIgpjZCAiL3dvb2RwZWNrZXIvc3JjIgoKZWNobyAn4pa2ICAnJ2dyYWRsZSBidWlsZCcKZ3JhZGxlIGJ1aWxkCg=="
 						}
 					],
 					"resources": {},
@@ -169,7 +276,12 @@ func TestTinyPod(t *testing.T) {
 					]
 				}
 			],
-			"restartPolicy": "Never"
+			"restartPolicy": "Never",
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "build-via-gradle"
 		},
 		"status": {}
 	}`
@@ -186,7 +298,7 @@ func TestTinyPod(t *testing.T) {
 		Environment: map[string]string{"CI": "woodpecker"},
 	}, &config{
 		Namespace: "woodpecker",
-	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{})
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{}, taskUUID)
 	assert.NoError(t, err)
 
 	podJSON, err := json.Marshal(pod)
@@ -196,18 +308,56 @@ func TestTinyPod(t *testing.T) {
 	ja.Assertf(string(podJSON), expected)
 }
 
+func TestServiceWorkspaceVolume(t *testing.T) {
+	useWorkspaceVolume := true
+	disableWorkspaceVolume := false
+	step := &types.Step{
+		Name:          "postgres",
+		Image:         "postgres:16",
+		UUID:          "01he8bebctabr3kgk0qj36d2me-0",
+		Type:          types.StepTypeService,
+		WorkingDir:    "/woodpecker/src",
+		WorkspaceBase: "/woodpecker",
+		Environment:   make(map[string]string),
+		Volumes:       []string{"workspace:/woodpecker", "cache:/cache"},
+	}
+
+	pod, err := mkPod(step, &config{Namespace: "woodpecker"}, "wp-svc-postgres", "linux/amd64", BackendOptions{}, taskUUID)
+	assert.NoError(t, err)
+	assert.Len(t, pod.Spec.Volumes, 2)
+	assert.Equal(t, "workspace", pod.Spec.Volumes[0].Name)
+	assert.Equal(t, "/woodpecker", pod.Spec.Containers[0].VolumeMounts[0].MountPath)
+	assert.Equal(t, "cache", pod.Spec.Volumes[1].Name)
+	assert.Equal(t, "/cache", pod.Spec.Containers[0].VolumeMounts[1].MountPath)
+
+	pod, err = mkPod(step, &config{Namespace: "woodpecker"}, "wp-svc-postgres", "linux/amd64", BackendOptions{WorkspaceVolume: &disableWorkspaceVolume}, taskUUID)
+	assert.NoError(t, err)
+	assert.Len(t, pod.Spec.Volumes, 1)
+	assert.Equal(t, "cache", pod.Spec.Volumes[0].Name)
+	assert.Len(t, pod.Spec.Containers[0].VolumeMounts, 1)
+	assert.Equal(t, "/cache", pod.Spec.Containers[0].VolumeMounts[0].MountPath)
+
+	pod, err = mkPod(step, &config{Namespace: "woodpecker"}, "wp-svc-postgres", "linux/amd64", BackendOptions{WorkspaceVolume: &useWorkspaceVolume}, taskUUID)
+	assert.NoError(t, err)
+	assert.Len(t, pod.Spec.Volumes, 2)
+	assert.Equal(t, "workspace", pod.Spec.Volumes[0].Name)
+	assert.Equal(t, "/woodpecker", pod.Spec.Containers[0].VolumeMounts[0].MountPath)
+	assert.Equal(t, "cache", pod.Spec.Volumes[1].Name)
+	assert.Equal(t, "/cache", pod.Spec.Containers[0].VolumeMounts[1].MountPath)
+}
+
 func TestFullPod(t *testing.T) {
 	const expected = `
 	{
 		"metadata": {
 			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
 			"namespace": "woodpecker",
-			"creationTimestamp": null,
 			"labels": {
 				"app": "test",
 				"part-of": "woodpecker-ci",
 				"step": "go-test",
-				"woodpecker-ci.org/step": "go-test"
+				"woodpecker-ci.org/step": "go-test",
+				"woodpecker-ci.org/task-uuid": "11301"
 			},
 			"annotations": {
 				"apps.kubernetes.io/pod-index": "0",
@@ -252,7 +402,7 @@ func TestFullPod(t *testing.T) {
 						},
 						{
 							"name": "CI_SCRIPT",
-							"value": "CmlmIFsgLW4gIiRDSV9ORVRSQ19NQUNISU5FIiBdOyB0aGVuCmNhdCA8PEVPRiA+ICRIT01FLy5uZXRyYwptYWNoaW5lICRDSV9ORVRSQ19NQUNISU5FCmxvZ2luICRDSV9ORVRSQ19VU0VSTkFNRQpwYXNzd29yZCAkQ0lfTkVUUkNfUEFTU1dPUkQKRU9GCmNobW9kIDA2MDAgJEhPTUUvLm5ldHJjCmZpCnVuc2V0IENJX05FVFJDX1VTRVJOQU1FCnVuc2V0IENJX05FVFJDX1BBU1NXT1JECnVuc2V0IENJX1NDUklQVApta2RpciAtcCAiL3dvb2RwZWNrZXIvc3JjIgpjZCAiL3dvb2RwZWNrZXIvc3JjIgoKZWNobyArICdnbyBnZXQnCmdvIGdldAoKZWNobyArICdnbyB0ZXN0JwpnbyB0ZXN0Cg=="
+							"value": "CmlmIFsgLW4gIiRDSV9ORVRSQ19NQUNISU5FIiBdOyB0aGVuCmNhdCA8PEVPRiA+ICRIT01FLy5uZXRyYwptYWNoaW5lICRDSV9ORVRSQ19NQUNISU5FCmxvZ2luICRDSV9ORVRSQ19VU0VSTkFNRQpwYXNzd29yZCAkQ0lfTkVUUkNfUEFTU1dPUkQKRU9GCmNobW9kIDA2MDAgJEhPTUUvLm5ldHJjCmZpCnVuc2V0IENJX05FVFJDX1VTRVJOQU1FCnVuc2V0IENJX05FVFJDX1BBU1NXT1JECnVuc2V0IENJX1NDUklQVApta2RpciAtcCAiL3dvb2RwZWNrZXIvc3JjIgpjZCAiL3dvb2RwZWNrZXIvc3JjIgoKZWNobyAn4pa2ICAnJ2dvIGdldCcKZ28gZ2V0CgplY2hvICfilrYgICcnZ28gdGVzdCcKZ28gdGVzdAo="
 						},
 						{
 							"name": "SHELL",
@@ -277,7 +427,11 @@ func TestFullPod(t *testing.T) {
 					],
 					"imagePullPolicy": "Always",
 					"securityContext": {
-						"privileged": true
+						"privileged": true,
+						"allowPrivilegeEscalation": false,
+						"capabilities": {
+							"drop": ["ALL"]
+						}
 					}
 				}
 			],
@@ -334,7 +488,11 @@ func TestFullPod(t *testing.T) {
 						"cf.v6"
 					]
 				}
-			]
+			],
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "go-test"
 		},
 		"status": {}
 	}`
@@ -349,14 +507,18 @@ func TestFullPod(t *testing.T) {
 		{Number: 2345, Protocol: "tcp"},
 		{Number: 3456, Protocol: "udp"},
 	}
-	fsGroupChangePolicy := v1.PodFSGroupChangePolicy("OnRootMismatch")
+	fsGroupChangePolicy := kube_core_v1.PodFSGroupChangePolicy("OnRootMismatch")
 	secCtx := SecurityContext{
-		Privileged:          newBool(true),
-		RunAsNonRoot:        newBool(true),
-		RunAsUser:           newInt64(101),
-		RunAsGroup:          newInt64(101),
-		FSGroup:             newInt64(101),
-		FsGroupChangePolicy: &fsGroupChangePolicy,
+		Privileged:               newBool(true),
+		RunAsNonRoot:             newBool(true),
+		RunAsUser:                newInt64(101),
+		RunAsGroup:               newInt64(101),
+		FSGroup:                  newInt64(101),
+		FsGroupChangePolicy:      &fsGroupChangePolicy,
+		AllowPrivilegeEscalation: newBool(false),
+		Capabilities: &Capabilities{
+			Drop: []string{"ALL"},
+		},
 		SeccompProfile: &SecProfile{
 			Type:             "Localhost",
 			LocalhostProfile: "profiles/audit.json",
@@ -384,28 +546,34 @@ func TestFullPod(t *testing.T) {
 			Password: "bar",
 		},
 	}, &config{
-		Namespace:                   "woodpecker",
-		ImagePullSecretNames:        []string{"regcred", "another-pull-secret"},
-		PodLabels:                   map[string]string{"app": "test"},
-		PodLabelsAllowFromStep:      true,
-		PodAnnotations:              map[string]string{"apps.kubernetes.io/pod-index": "0"},
-		PodAnnotationsAllowFromStep: true,
-		PodTolerationsAllowFromStep: true,
-		PodNodeSelector:             map[string]string{"topology.kubernetes.io/region": "eu-central-1"},
-		SecurityContext:             SecurityContextConfig{RunAsNonRoot: false},
-	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
-		Labels:             map[string]string{"part-of": "woodpecker-ci"},
-		Annotations:        map[string]string{"kubernetes.io/limit-ranger": "LimitRanger plugin set: cpu, memory request and limit for container"},
-		NodeSelector:       map[string]string{"storage": "ssd"},
-		RuntimeClassName:   &runtimeClass,
-		ServiceAccountName: "wp-svc-acc",
-		Tolerations:        []Toleration{{Key: "net-port", Value: "100Mbit", Effect: TaintEffectNoSchedule}},
-		Resources: Resources{
-			Requests: map[string]string{"memory": "128Mi", "cpu": "1000m"},
-			Limits:   map[string]string{"memory": "256Mi", "cpu": "2"},
-		},
-		SecurityContext: &secCtx,
-	})
+		Namespace:                       "woodpecker",
+		ImagePullSecretNames:            []string{"regcred", "another-pull-secret"},
+		PodLabels:                       map[string]string{"app": "test"},
+		PodLabelsAllowFromStep:          true,
+		PodAnnotations:                  map[string]string{"apps.kubernetes.io/pod-index": "0"},
+		PodAnnotationsAllowFromStep:     true,
+		PodTolerationsAllowFromStep:     true,
+		PodNodeSelector:                 map[string]string{"topology.kubernetes.io/region": "eu-central-1"},
+		PodNodeSelectorAllowFromStep:    true,
+		SecurityContext:                 SecurityContextConfig{RunAsNonRoot: false},
+		ServiceAccountNameAllowFromStep: true,
+		RuntimeClassAllowFromStep:       true,
+	},
+		"wp-01he8bebctabr3kgk0qj36d2me-0",
+		"linux/amd64",
+		BackendOptions{
+			Labels:             map[string]string{"part-of": "woodpecker-ci"},
+			Annotations:        map[string]string{"kubernetes.io/limit-ranger": "LimitRanger plugin set: cpu, memory request and limit for container"},
+			NodeSelector:       map[string]string{"storage": "ssd"},
+			RuntimeClassName:   &runtimeClass,
+			ServiceAccountName: "wp-svc-acc",
+			Tolerations:        []Toleration{{Key: "net-port", Value: "100Mbit", Effect: TaintEffectNoSchedule}},
+			Resources: Resources{
+				Requests: map[string]string{"memory": "128Mi", "cpu": "1000m"},
+				Limits:   map[string]string{"memory": "256Mi", "cpu": "2"},
+			},
+			SecurityContext: &secCtx,
+		}, taskUUID)
 	assert.NoError(t, err)
 
 	podJSON, err := json.Marshal(pod)
@@ -416,7 +584,17 @@ func TestFullPod(t *testing.T) {
 }
 
 func TestPodPrivilege(t *testing.T) {
-	createTestPod := func(stepPrivileged, globalRunAsRoot bool, secCtx SecurityContext) (*v1.Pod, error) {
+	createTestPod := func(stepPrivileged, globalRunAsRoot bool, secCtx SecurityContext, hostUsersAndOverrideNonRoot ...bool) (*kube_core_v1.Pod, error) {
+		opts := BackendOptions{
+			SecurityContext: &secCtx,
+		}
+		secCtxCfg := SecurityContextConfig{RunAsNonRoot: globalRunAsRoot}
+		if len(hostUsersAndOverrideNonRoot) > 0 {
+			opts.HostUsers = newBool(hostUsersAndOverrideNonRoot[0])
+		}
+		if len(hostUsersAndOverrideNonRoot) > 1 {
+			secCtxCfg.OverrideNonRootInUserNamespaces = hostUsersAndOverrideNonRoot[1]
+		}
 		return mkPod(&types.Step{
 			Name:       "go-test",
 			Image:      "golang:1.16",
@@ -424,10 +602,8 @@ func TestPodPrivilege(t *testing.T) {
 			Privileged: stepPrivileged,
 		}, &config{
 			Namespace:       "woodpecker",
-			SecurityContext: SecurityContextConfig{RunAsNonRoot: globalRunAsRoot},
-		}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
-			SecurityContext: &secCtx,
-		})
+			SecurityContext: secCtxCfg,
+		}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", opts, "11301")
 	}
 
 	// securty context is requesting user and group 101 (non-root)
@@ -450,21 +626,45 @@ func TestPodPrivilege(t *testing.T) {
 	}
 	pod, err = createTestPod(false, false, secCtx)
 	assert.NoError(t, err)
-	assert.Equal(t, &v1.PodSecurityContext{
-		SELinuxOptions:           (*v1.SELinuxOptions)(nil),
-		WindowsOptions:           (*v1.WindowsSecurityContextOptions)(nil),
+	assert.Equal(t, &kube_core_v1.PodSecurityContext{
+		SELinuxOptions:           (*kube_core_v1.SELinuxOptions)(nil),
+		WindowsOptions:           (*kube_core_v1.WindowsSecurityContextOptions)(nil),
 		RunAsUser:                (*int64)(nil),
 		RunAsGroup:               (*int64)(nil),
 		RunAsNonRoot:             (*bool)(nil),
 		SupplementalGroups:       []int64(nil),
-		SupplementalGroupsPolicy: (*v1.SupplementalGroupsPolicy)(nil),
+		SupplementalGroupsPolicy: (*kube_core_v1.SupplementalGroupsPolicy)(nil),
 		FSGroup:                  newInt64(0),
-		Sysctls:                  []v1.Sysctl(nil),
-		FSGroupChangePolicy:      (*v1.PodFSGroupChangePolicy)(nil),
-		SeccompProfile:           (*v1.SeccompProfile)(nil),
-		AppArmorProfile:          (*v1.AppArmorProfile)(nil),
+		Sysctls:                  []kube_core_v1.Sysctl(nil),
+		FSGroupChangePolicy:      (*kube_core_v1.PodFSGroupChangePolicy)(nil),
+		SeccompProfile:           (*kube_core_v1.SeccompProfile)(nil),
+		AppArmorProfile:          (*kube_core_v1.AppArmorProfile)(nil),
 	}, pod.Spec.SecurityContext)
 	assert.Nil(t, pod.Spec.Containers[0].SecurityContext)
+
+	// securty context is requesting root with hostUsers=false (user namespaces): allowed
+	secCtx = SecurityContext{
+		RunAsUser:  newInt64(0),
+		RunAsGroup: newInt64(0),
+		FSGroup:    newInt64(0),
+	}
+	pod, err = createTestPod(false, false, secCtx, false)
+	assert.NoError(t, err)
+	assert.Equal(t, int64(0), *pod.Spec.SecurityContext.RunAsUser)
+	assert.Equal(t, int64(0), *pod.Spec.SecurityContext.RunAsGroup)
+	assert.Equal(t, int64(0), *pod.Spec.SecurityContext.FSGroup)
+	assert.False(t, *pod.Spec.HostUsers)
+
+	// securty context is requesting root with hostUsers=true: still blocked
+	secCtx = SecurityContext{
+		RunAsUser:  newInt64(0),
+		RunAsGroup: newInt64(0),
+		FSGroup:    newInt64(0),
+	}
+	pod, err = createTestPod(false, false, secCtx, true)
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.SecurityContext.RunAsUser)
+	assert.Nil(t, pod.Spec.SecurityContext.RunAsGroup)
 
 	// step is not privileged, but security context is requesting privileged
 	secCtx = SecurityContext{
@@ -473,7 +673,7 @@ func TestPodPrivilege(t *testing.T) {
 	pod, err = createTestPod(false, false, secCtx)
 	assert.NoError(t, err)
 	assert.Nil(t, pod.Spec.SecurityContext)
-	assert.Equal(t, (*v1.PodSecurityContext)(nil), pod.Spec.SecurityContext)
+	assert.Equal(t, (*kube_core_v1.PodSecurityContext)(nil), pod.Spec.SecurityContext)
 
 	// step is privileged and security context is requesting privileged
 	secCtx = SecurityContext{
@@ -496,6 +696,82 @@ func TestPodPrivilege(t *testing.T) {
 	pod, err = createTestPod(false, true, secCtx)
 	assert.NoError(t, err)
 	assert.True(t, *pod.Spec.SecurityContext.RunAsNonRoot)
+
+	// global runAsNonRoot is true and override is requested value by security context
+	// hostUsers=false and overrideNonRootInUserNamespaces=true: applied
+	secCtx = SecurityContext{
+		RunAsNonRoot: newBool(false),
+	}
+	pod, err = createTestPod(false, true, secCtx, false, true)
+	assert.NoError(t, err)
+	assert.False(t, *pod.Spec.SecurityContext.RunAsNonRoot)
+
+	// global runAsNonRoot is true and override is requested value by security context
+	// and hostUsers=false: ignored
+	secCtx = SecurityContext{
+		RunAsNonRoot: newBool(false),
+	}
+	pod, err = createTestPod(false, true, secCtx, false)
+	assert.NoError(t, err)
+	assert.True(t, *pod.Spec.SecurityContext.RunAsNonRoot)
+
+	// global runAsNonRoot is true and override is requested value by security context
+	// and hostUsers=true: ignored
+	secCtx = SecurityContext{
+		RunAsNonRoot: newBool(false),
+	}
+	pod, err = createTestPod(false, true, secCtx, true)
+	assert.NoError(t, err)
+	assert.True(t, *pod.Spec.SecurityContext.RunAsNonRoot)
+
+	// non-privileged step with allowPrivilegeEscalation=false: applied
+	secCtx = SecurityContext{
+		AllowPrivilegeEscalation: newBool(false),
+	}
+	pod, err = createTestPod(false, false, secCtx)
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.Containers[0].SecurityContext)
+	assert.False(t, *pod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+	assert.Nil(t, pod.Spec.Containers[0].SecurityContext.Privileged)
+
+	// non-privileged step with allowPrivilegeEscalation=true: ignored
+	secCtx = SecurityContext{
+		AllowPrivilegeEscalation: newBool(true),
+	}
+	pod, err = createTestPod(false, false, secCtx)
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.Containers[0].SecurityContext)
+
+	// privileged step with allowPrivilegeEscalation=true: ignored
+	secCtx = SecurityContext{
+		AllowPrivilegeEscalation: newBool(true),
+	}
+	pod, err = createTestPod(true, false, secCtx)
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+
+	// non-privileged step with capabilities drop: applied
+	secCtx = SecurityContext{
+		Capabilities: &Capabilities{Drop: []string{"ALL"}},
+	}
+	pod, err = createTestPod(false, false, secCtx)
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.Containers[0].SecurityContext)
+	assert.Equal(t, []kube_core_v1.Capability{"ALL"}, pod.Spec.Containers[0].SecurityContext.Capabilities.Drop)
+	assert.Nil(t, pod.Spec.Containers[0].SecurityContext.Capabilities.Add)
+	assert.Nil(t, pod.Spec.Containers[0].SecurityContext.Privileged)
+
+	// non-privileged step with drop capabilities and allowPrivilegeEscalation=false: both applied
+	secCtx = SecurityContext{
+		AllowPrivilegeEscalation: newBool(false),
+		Capabilities:             &Capabilities{Drop: []string{"ALL"}},
+	}
+	pod, err = createTestPod(false, false, secCtx)
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.Containers[0].SecurityContext)
+	assert.Nil(t, pod.Spec.Containers[0].SecurityContext.Privileged)
+	assert.False(t, *pod.Spec.Containers[0].SecurityContext.AllowPrivilegeEscalation)
+	assert.Equal(t, []kube_core_v1.Capability{"ALL"}, pod.Spec.Containers[0].SecurityContext.Capabilities.Drop)
 }
 
 func TestScratchPod(t *testing.T) {
@@ -504,10 +780,10 @@ func TestScratchPod(t *testing.T) {
 		"metadata": {
 			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
 			"namespace": "woodpecker",
-			"creationTimestamp": null,
 			"labels": {
 				"step": "curl-google",
-				"woodpecker-ci.org/step": "curl-google"
+				"woodpecker-ci.org/step": "curl-google",
+				"woodpecker-ci.org/task-uuid": "11301"
 			}
 		},
 		"spec": {
@@ -523,7 +799,12 @@ func TestScratchPod(t *testing.T) {
 					"resources": {}
 				}
 			],
-			"restartPolicy": "Never"
+			"restartPolicy": "Never",
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "curl-google"
 		},
 		"status": {}
 	}`
@@ -535,7 +816,7 @@ func TestScratchPod(t *testing.T) {
 		Entrypoint: []string{"/usr/bin/curl", "-v", "google.com"},
 	}, &config{
 		Namespace: "woodpecker",
-	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{})
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{}, taskUUID)
 	assert.NoError(t, err)
 
 	podJSON, err := json.Marshal(pod)
@@ -551,10 +832,10 @@ func TestSecrets(t *testing.T) {
 		"metadata": {
 			"name": "wp-3kgk0qj36d2me01he8bebctabr-0",
 			"namespace": "woodpecker",
-			"creationTimestamp": null,
 			"labels": {
 				"step": "test-secrets",
-				"woodpecker-ci.org/step": "test-secrets"
+				"woodpecker-ci.org/step": "test-secrets",
+				"woodpecker-ci.org/task-uuid": "11301"
 			}
 		},
 		"spec": {
@@ -622,7 +903,12 @@ func TestSecrets(t *testing.T) {
 					]
 				}
 			],
-			"restartPolicy": "Never"
+			"restartPolicy": "Never",
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "test-secrets"
 		},
 		"status": {}
 	}`
@@ -656,7 +942,7 @@ func TestSecrets(t *testing.T) {
 				Target: SecretTarget{File: "~/.docker/config.json"},
 			},
 		},
-	})
+	}, taskUUID)
 	assert.NoError(t, err)
 
 	podJSON, err := json.Marshal(pod)
@@ -672,10 +958,10 @@ func TestPodTolerations(t *testing.T) {
 		"metadata": {
 			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
 			"namespace": "woodpecker",
-			"creationTimestamp": null,
 			"labels": {
 				"step": "toleration-test",
-				"woodpecker-ci.org/step": "toleration-test"
+				"woodpecker-ci.org/step": "toleration-test",
+				"woodpecker-ci.org/task-uuid": "11301"
 			}
 		},
 		"spec": {
@@ -698,7 +984,12 @@ func TestPodTolerations(t *testing.T) {
 					"value": "qux",
 					"effect": "NoExecute"
 				}
-			]
+			],
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "toleration-test"
 		},
 		"status": {}
 	}`
@@ -716,7 +1007,7 @@ func TestPodTolerations(t *testing.T) {
 		Namespace:                   "woodpecker",
 		PodTolerations:              globalTolerations,
 		PodTolerationsAllowFromStep: false,
-	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{})
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{}, taskUUID)
 	assert.NoError(t, err)
 
 	podJSON, err := json.Marshal(pod)
@@ -732,10 +1023,10 @@ func TestPodTolerationsAllowFromStep(t *testing.T) {
 		"metadata": {
 			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
 			"namespace": "woodpecker",
-			"creationTimestamp": null,
 			"labels": {
 				"step": "toleration-test",
-				"woodpecker-ci.org/step": "toleration-test"
+				"woodpecker-ci.org/step": "toleration-test",
+				"woodpecker-ci.org/task-uuid": "11301"
 			}
 		},
 		"spec": {
@@ -746,7 +1037,12 @@ func TestPodTolerationsAllowFromStep(t *testing.T) {
 					"resources": {}
 				}
 			],
-			"restartPolicy": "Never"
+			"restartPolicy": "Never",
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "toleration-test"
 		},
 		"status": {}
 	}`
@@ -755,10 +1051,10 @@ func TestPodTolerationsAllowFromStep(t *testing.T) {
 		"metadata": {
 			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
 			"namespace": "woodpecker",
-			"creationTimestamp": null,
 			"labels": {
 				"step": "toleration-test",
-				"woodpecker-ci.org/step": "toleration-test"
+				"woodpecker-ci.org/step": "toleration-test",
+				"woodpecker-ci.org/task-uuid": "11301"
 			}
 		},
 		"spec": {
@@ -776,7 +1072,12 @@ func TestPodTolerationsAllowFromStep(t *testing.T) {
 					"value": "value",
 					"effect": "NoSchedule"
 				}
-			]
+			],
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "toleration-test"
 		},
 		"status": {}
 	}`
@@ -796,7 +1097,7 @@ func TestPodTolerationsAllowFromStep(t *testing.T) {
 		PodTolerationsAllowFromStep: false,
 	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
 		Tolerations: stepTolerations,
-	})
+	}, taskUUID)
 	assert.NoError(t, err)
 
 	podJSON, err := json.Marshal(pod)
@@ -810,7 +1111,7 @@ func TestPodTolerationsAllowFromStep(t *testing.T) {
 		PodTolerationsAllowFromStep: true,
 	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
 		Tolerations: stepTolerations,
-	})
+	}, taskUUID)
 	assert.NoError(t, err)
 
 	podJSON, err = json.Marshal(pod)
@@ -820,12 +1121,38 @@ func TestPodTolerationsAllowFromStep(t *testing.T) {
 	ja.Assertf(string(podJSON), expectedAllow)
 }
 
+func TestServiceAccountNameAllowFromStep(t *testing.T) {
+	step := &types.Step{
+		Name:  "sa-test",
+		Image: "alpine",
+		UUID:  "01he8bebctabr3kgk0qj36d2me-0",
+	}
+
+	// When disabled (default), a step-provided service account name must be ignored.
+	pod, err := mkPod(step, &config{
+		Namespace: "woodpecker",
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+		ServiceAccountName: "privileged-sa",
+	}, taskUUID)
+	assert.NoError(t, err)
+	assert.Empty(t, pod.Spec.ServiceAccountName)
+
+	// When explicitly enabled by the admin, the step value is honored.
+	pod, err = mkPod(step, &config{
+		Namespace:                       "woodpecker",
+		ServiceAccountNameAllowFromStep: true,
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+		ServiceAccountName: "privileged-sa",
+	}, taskUUID)
+	assert.NoError(t, err)
+	assert.Equal(t, "privileged-sa", pod.Spec.ServiceAccountName)
+}
+
 func TestStepSecret(t *testing.T) {
 	const expected = `{
 		"metadata": {
 			"name": "wp-01he8bebctabr3kgk0qj36d2me-0-step-secret",
-			"namespace": "woodpecker",
-			"creationTimestamp": null
+			"namespace": "woodpecker"
 		},
 		"type": "Opaque",
 		"stringData": {
@@ -850,4 +1177,485 @@ func TestStepSecret(t *testing.T) {
 
 	ja := jsonassert.New(t)
 	ja.Assertf(string(secretJSON), expected)
+}
+
+func TestPodAffinity(t *testing.T) {
+	const expected = `
+	{
+		"metadata": {
+			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+			"namespace": "woodpecker",
+			"labels": {
+				"step": "affinity-test",
+				"woodpecker-ci.org/step": "affinity-test",
+				"woodpecker-ci.org/task-uuid": "11301"
+			}
+		},
+		"spec": {
+			"containers": [
+				{
+					"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+					"image": "alpine",
+					"resources": {}
+				}
+			],
+			"restartPolicy": "Never",
+			"affinity": {
+				"podAffinity": {
+					"requiredDuringSchedulingIgnoredDuringExecution": [
+						{
+							"labelSelector": {},
+							"matchLabelKeys": ["woodpecker-ci.org/task-uuid"],
+							"topologyKey": "kubernetes.io/hostname"
+						}
+					]
+				}
+			},
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "affinity-test"
+		},
+		"status": {}
+	}`
+
+	agentAffinity := &kube_core_v1.Affinity{
+		PodAffinity: &kube_core_v1.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []kube_core_v1.PodAffinityTerm{
+				{
+					LabelSelector:  &kube_meta_v1.LabelSelector{},
+					MatchLabelKeys: []string{"woodpecker-ci.org/task-uuid"},
+					TopologyKey:    "kubernetes.io/hostname",
+				},
+			},
+		},
+	}
+
+	pod, err := mkPod(&types.Step{
+		Name:  "affinity-test",
+		Image: "alpine",
+		UUID:  "01he8bebctabr3kgk0qj36d2me-0",
+	}, &config{
+		Namespace:                "woodpecker",
+		PodAffinity:              agentAffinity,
+		PodAffinityAllowFromStep: false,
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{}, taskUUID)
+	assert.NoError(t, err)
+
+	podJSON, err := json.Marshal(pod)
+	assert.NoError(t, err)
+
+	ja := jsonassert.New(t)
+	ja.Assertf(string(podJSON), expected)
+}
+
+func TestPodAffinityAllowFromStep(t *testing.T) {
+	const expectedDisallow = `
+	{
+		"metadata": {
+			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+			"namespace": "woodpecker",
+			"labels": {
+				"step": "affinity-test",
+				"woodpecker-ci.org/step": "affinity-test",
+				"woodpecker-ci.org/task-uuid": "11301"
+			}
+		},
+		"spec": {
+			"containers": [
+				{
+					"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+					"image": "alpine",
+					"resources": {}
+				}
+			],
+			"restartPolicy": "Never",
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "affinity-test"
+		},
+		"status": {}
+	}`
+	const expectedAllow = `
+	{
+		"metadata": {
+			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+			"namespace": "woodpecker",
+			"labels": {
+				"step": "affinity-test",
+				"woodpecker-ci.org/step": "affinity-test",
+				"woodpecker-ci.org/task-uuid": "11301"
+			}
+		},
+		"spec": {
+			"containers": [
+				{
+					"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+					"image": "alpine",
+					"resources": {}
+				}
+			],
+			"restartPolicy": "Never",
+			"affinity": {
+				"podAntiAffinity": {
+					"preferredDuringSchedulingIgnoredDuringExecution": [
+						{
+							"weight": 100,
+							"podAffinityTerm": {
+								"labelSelector": {
+									"matchLabels": {
+										"app": "woodpecker"
+									}
+								},
+								"topologyKey": "kubernetes.io/hostname"
+							}
+						}
+					]
+				}
+			},
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "affinity-test"
+		},
+		"status": {}
+	}`
+
+	stepAffinity := &kube_core_v1.Affinity{
+		PodAntiAffinity: &kube_core_v1.PodAntiAffinity{
+			PreferredDuringSchedulingIgnoredDuringExecution: []kube_core_v1.WeightedPodAffinityTerm{
+				{
+					Weight: 100,
+					PodAffinityTerm: kube_core_v1.PodAffinityTerm{
+						LabelSelector: &kube_meta_v1.LabelSelector{
+							MatchLabels: map[string]string{
+								"app": "woodpecker",
+							},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					},
+				},
+			},
+		},
+	}
+
+	step := &types.Step{
+		Name:  "affinity-test",
+		Image: "alpine",
+		UUID:  "01he8bebctabr3kgk0qj36d2me-0",
+	}
+
+	pod, err := mkPod(step, &config{
+		Namespace:                "woodpecker",
+		PodAffinity:              nil,
+		PodAffinityAllowFromStep: false,
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+		Affinity: stepAffinity,
+	}, taskUUID)
+	assert.NoError(t, err)
+
+	podJSON, err := json.Marshal(pod)
+	assert.NoError(t, err)
+
+	ja := jsonassert.New(t)
+	ja.Assertf(string(podJSON), expectedDisallow)
+
+	pod, err = mkPod(step, &config{
+		Namespace:                "woodpecker",
+		PodAffinity:              nil,
+		PodAffinityAllowFromStep: true,
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+		Affinity: stepAffinity,
+	}, taskUUID)
+	assert.NoError(t, err)
+
+	podJSON, err = json.Marshal(pod)
+	assert.NoError(t, err)
+
+	ja = jsonassert.New(t)
+	ja.Assertf(string(podJSON), expectedAllow)
+}
+
+func TestPodAffinityStepOverridesAgent(t *testing.T) {
+	const expected = `
+	{
+		"metadata": {
+			"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+			"namespace": "woodpecker",
+			"labels": {
+				"step": "affinity-test",
+				"woodpecker-ci.org/step": "affinity-test",
+				"woodpecker-ci.org/task-uuid": "11301"
+			}
+		},
+		"spec": {
+			"containers": [
+				{
+					"name": "wp-01he8bebctabr3kgk0qj36d2me-0",
+					"image": "alpine",
+					"resources": {}
+				}
+			],
+			"restartPolicy": "Never",
+			"affinity": {
+				"nodeAffinity": {
+					"requiredDuringSchedulingIgnoredDuringExecution": {
+						"nodeSelectorTerms": [
+							{
+								"matchExpressions": [
+									{
+										"key": "disk-type",
+										"operator": "In",
+										"values": ["ssd"]
+									}
+								]
+							}
+						]
+					}
+				}
+			},
+			"dnsConfig": {
+				"searches": ["wp-hsvc-11301.woodpecker.svc.cluster.local"]
+			},
+			"subdomain": "wp-hsvc-11301",
+			"hostname": "affinity-test"
+		},
+		"status": {}
+	}`
+
+	agentAffinity := &kube_core_v1.Affinity{
+		NodeAffinity: &kube_core_v1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &kube_core_v1.NodeSelector{
+				NodeSelectorTerms: []kube_core_v1.NodeSelectorTerm{
+					{
+						MatchExpressions: []kube_core_v1.NodeSelectorRequirement{
+							{
+								Key:      "topology.kubernetes.io/zone",
+								Operator: kube_core_v1.NodeSelectorOpIn,
+								Values:   []string{"eu-central-1a"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	stepAffinity := &kube_core_v1.Affinity{
+		NodeAffinity: &kube_core_v1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &kube_core_v1.NodeSelector{
+				NodeSelectorTerms: []kube_core_v1.NodeSelectorTerm{
+					{
+						MatchExpressions: []kube_core_v1.NodeSelectorRequirement{
+							{
+								Key:      "disk-type",
+								Operator: kube_core_v1.NodeSelectorOpIn,
+								Values:   []string{"ssd"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pod, err := mkPod(&types.Step{
+		Name:  "affinity-test",
+		Image: "alpine",
+		UUID:  "01he8bebctabr3kgk0qj36d2me-0",
+	}, &config{
+		Namespace:                "woodpecker",
+		PodAffinity:              agentAffinity,
+		PodAffinityAllowFromStep: true,
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+		Affinity: stepAffinity,
+	}, taskUUID)
+	assert.NoError(t, err)
+
+	podJSON, err := json.Marshal(pod)
+	assert.NoError(t, err)
+
+	ja := jsonassert.New(t)
+	ja.Assertf(string(podJSON), expected)
+}
+
+func TestHostUsers(t *testing.T) {
+	createTestPod := func(hostUsers *bool) (*kube_core_v1.Pod, error) {
+		return mkPod(&types.Step{
+			Name:  "go-test",
+			Image: "golang:1.16",
+			UUID:  "01he8bebctabr3kgk0qj36d2me-0",
+		}, &config{
+			Namespace: "woodpecker",
+		}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+			HostUsers: hostUsers,
+		}, "11301")
+	}
+
+	// hostUsers not set: nil (k8s defaults to true)
+	pod, err := createTestPod(nil)
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.HostUsers)
+
+	// hostUsers set to false: enables user namespace isolation
+	pod, err = createTestPod(newBool(false))
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.HostUsers)
+	assert.False(t, *pod.Spec.HostUsers)
+
+	// hostUsers set to true: explicitly use host user namespace
+	pod, err = createTestPod(newBool(true))
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.HostUsers)
+	assert.True(t, *pod.Spec.HostUsers)
+}
+
+func TestUserNamespaces(t *testing.T) {
+	createTestPod := func(enableUserNamespaces bool, hostUsers *bool) (*kube_core_v1.Pod, error) {
+		return mkPod(&types.Step{
+			Name:  "go-test",
+			Image: "golang:1.16",
+			UUID:  "01he8bebctabr3kgk0qj36d2me-0",
+		}, &config{
+			Namespace:            "woodpecker",
+			EnableUserNamespaces: enableUserNamespaces,
+		}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+			HostUsers: hostUsers,
+		}, "11301")
+	}
+
+	// default: option not enabled, hostUsers option not explicitly set: nil
+	pod, err := createTestPod(false, nil)
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.HostUsers)
+
+	// option enabled, hostUsers option not explicitly set: false
+	pod, err = createTestPod(true, nil)
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.HostUsers)
+	assert.False(t, *pod.Spec.HostUsers)
+
+	// option enabled, hostUsers option explicitly set to false: false
+	pod, err = createTestPod(true, newBool(false))
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.HostUsers)
+	assert.False(t, *pod.Spec.HostUsers)
+
+	// option enabled, hostUsers option explicitly set to true: true
+	pod, err = createTestPod(true, newBool(true))
+	assert.NoError(t, err)
+	assert.NotNil(t, pod.Spec.HostUsers)
+	assert.True(t, *pod.Spec.HostUsers)
+}
+
+func TestInitContainer(t *testing.T) {
+	const expected = `
+	{
+		"name": "init-wp-01he8bebctabr3kgk0qj36d2me-0",
+		"image": "busybox:stable-musl",
+		"imagePullPolicy": "Always",
+		"args": [
+			"mkdir",
+			"-p",
+			"/woodpecker/src/github.com/woodpecker-ci/woodpecker"
+		],
+		"resources": {
+			"requests": {
+				"cpu": "5m",
+				"memory": "12Mi"
+			},
+			"limits": {
+				"cpu": "5m",
+				"memory": "12Mi"
+			}
+		},
+		"securityContext": {
+			"allowPrivilegeEscalation": false,
+			"capabilities": {"drop": ["ALL"]}
+		},
+		"volumeMounts": [
+			{
+				"name": "workspace",
+				"mountPath": "/woodpecker/src"
+			}
+		]
+	}`
+
+	pod, err := mkPod(&types.Step{
+		Name:       "clone",
+		Image:      "docker.io/woodpeckerci/plugin-git",
+		UUID:       "01he8bebctabr3kgk0qj36d2me-0",
+		WorkingDir: "/woodpecker/src/github.com/woodpecker-ci/woodpecker",
+		Volumes:    []string{"workspace:/woodpecker/src", "other:/other"},
+	}, &config{
+		Namespace:           "woodpecker",
+		PermissionInitImage: "busybox:stable-musl",
+	}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", BackendOptions{
+		SecurityContext: &SecurityContext{
+			RunAsNonRoot: newBool(true),
+			RunAsUser:    newInt64(1000),
+		},
+	}, taskUUID)
+	assert.NoError(t, err)
+
+	assert.NotNil(t, pod.Spec.InitContainers)
+	assert.NotEmpty(t, pod.Spec.InitContainers)
+	assert.Len(t, pod.Spec.InitContainers, 1)
+	podJSON, err := json.Marshal(pod.Spec.InitContainers[0])
+	assert.NoError(t, err)
+
+	ja := jsonassert.New(t)
+	ja.Assertf(string(podJSON), expected)
+}
+
+func TestUnrequiredInitContainer(t *testing.T) {
+	createTestPod := func(workingDir string, backendOpts BackendOptions) (*kube_core_v1.Pod, error) {
+		return mkPod(&types.Step{
+			Name:       "init-container-test",
+			Image:      "docker.io/woodpeckerci/plugin-git",
+			UUID:       "01he8bebctabr3kgk0qj36d2me-0",
+			WorkingDir: workingDir,
+			Volumes:    []string{"workspace:/woodpecker/src"},
+		}, &config{
+			Namespace: "woodpecker",
+		}, "wp-01he8bebctabr3kgk0qj36d2me-0", "linux/amd64", backendOpts, taskUUID)
+	}
+	// no security context (pod running as root), does not need init container
+	pod, err := createTestPod("/woodpecker/src/github.com/woodpecker-ci/woodpecker", BackendOptions{})
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.InitContainers)
+
+	// explicit security context requesting root, does not need init container
+	pod, err = createTestPod("/woodpecker/src/github.com/woodpecker-ci/woodpecker", BackendOptions{
+		SecurityContext: &SecurityContext{
+			RunAsNonRoot: newBool(false),
+			RunAsUser:    newInt64(0),
+		},
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.InitContainers)
+
+	// working dir is outside of the workspace volume, does not need init container
+	pod, err = createTestPod("/tmp", BackendOptions{
+		SecurityContext: &SecurityContext{
+			RunAsNonRoot: newBool(true),
+			RunAsUser:    newInt64(1000),
+		},
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.InitContainers)
+
+	// workingDir is exactly the same as the workspace volume mount path, does not need init container
+	pod, err = createTestPod("/woodpecker/src", BackendOptions{
+		SecurityContext: &SecurityContext{
+			RunAsNonRoot: newBool(true),
+			RunAsUser:    newInt64(1000),
+		},
+	})
+	assert.NoError(t, err)
+	assert.Nil(t, pod.Spec.InitContainers)
 }

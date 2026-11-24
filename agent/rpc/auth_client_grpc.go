@@ -20,7 +20,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"go.woodpecker-ci.org/woodpecker/v3/pipeline/rpc/proto"
+	"go.woodpecker-ci.org/woodpecker/v3/rpc/proto"
 )
 
 const authClientTimeout = time.Second * 5
@@ -39,6 +39,10 @@ func NewAuthGrpcClient(conn *grpc.ClientConn, agentToken string, agentID int64) 
 	client.agentToken = agentToken
 	client.agentID = agentID
 	return client
+}
+
+func (c *AuthClient) AgentID() int64 {
+	return c.agentID
 }
 
 func (c *AuthClient) Auth(ctx context.Context) (string, int64, error) {

@@ -17,8 +17,9 @@ package model
 import (
 	"encoding/base32"
 	"fmt"
+	"maps"
 
-	"github.com/gorilla/securecookie"
+	"github.com/tink-crypto/tink-go/v2/subtle/random"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline"
 )
@@ -39,7 +40,9 @@ type Agent struct {
 	NoSchedule   bool              `json:"no_schedule"   xorm:"no_schedule"`
 	CustomLabels map[string]string `json:"custom_labels" xorm:"JSON 'custom_labels'"`
 	// OrgID is counted as unset if set to -1, this is done to ensure a new(Agent) still enforce the OrgID check by default
-	OrgID int64 `json:"org_id"        xorm:"INDEX 'org_id'"`
+	OrgID int64 `json:"org_id" xorm:"INDEX 'org_id'"`
+	// Server side enforced agent filters
+	Filters map[string]string `json:"filters" xorm:"'filters' json"`
 } //	@name	Agent
 
 const (
@@ -52,15 +55,20 @@ func (Agent) TableName() string {
 }
 
 func (a *Agent) IsSystemAgent() bool {
-	return a.OwnerID == IDNotSet
+	return a.OwnerID == IDNotSet &&
+		a.OrgID == IDNotSet
 }
 
 func GenerateNewAgentToken() string {
-	return base32.StdEncoding.EncodeToString(securecookie.GenerateRandomKey(32))
+	return base32.StdEncoding.EncodeToString(random.GetRandomBytes(32))
 }
 
 func (a *Agent) GetServerLabels() (map[string]string, error) {
-	filters := make(map[string]string)
+	// clone, the returned map is amended below and must not leak back into the agent
+	filters := maps.Clone(a.Filters)
+	if filters == nil {
+		filters = make(map[string]string)
+	}
 
 	// enforce filters for user and organization agents
 	if a.OrgID != IDNotSet {

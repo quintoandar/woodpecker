@@ -3,5 +3,8 @@ export interface Cron {
   name: string;
   branch: string;
   schedule: string;
+  timezone: string;
+  enabled: boolean;
   next_exec: number;
+  variables: Record<string, string>;
 }

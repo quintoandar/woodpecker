@@ -18,6 +18,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.yaml.in/yaml/v4"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/metadata"
 	yaml_base_types "go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/types/base"
@@ -44,11 +46,49 @@ func TestParse(t *testing.T) {
 		assert.Equal(t, "slack", out.Steps.ContainerList[2].Image)
 		assert.Equal(t, "frontend", out.Labels["com.example.team"])
 		assert.Equal(t, "build", out.Labels["com.example.type"])
-		assert.Equal(t, "lint", out.DependsOn[0])
-		assert.Equal(t, "test", out.DependsOn[1])
-		assert.Equal(t, ("success"), out.RunsOn[0])
-		assert.Equal(t, ("failure"), out.RunsOn[1])
+		assert.Equal(t, "lint", out.DependsOn[0].Name)
+		assert.Equal(t, "test", out.DependsOn[1].Name)
+		assert.EqualValues(t, []string{"success", "failure"}, out.When.Constraints[0].Status)
 		assert.False(t, out.SkipClone)
+	})
+
+	t.Run("Should fail on invalid yaml", func(t *testing.T) {
+		_, err := ParseString("notvalid")
+		assert.Error(t, err)
+	})
+
+	t.Run("Should unmarshal concurrency object", func(t *testing.T) {
+		out, err := ParseString(`steps:
+  deploy:
+    image: alpine
+concurrency:
+  limit: 2
+  group: deploy
+`)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, out.Concurrency.Limit)
+		assert.Equal(t, "deploy", out.Concurrency.Group)
+	})
+
+	t.Run("Should unmarshal concurrency shorthand", func(t *testing.T) {
+		out, err := ParseString(`steps:
+  deploy:
+    image: alpine
+concurrency: 1
+`)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, out.Concurrency.Limit)
+		assert.Empty(t, out.Concurrency.Group)
+	})
+
+	t.Run("Should default concurrency to disabled", func(t *testing.T) {
+		out, err := ParseString(`steps:
+  deploy:
+    image: alpine
+`)
+		assert.NoError(t, err)
+		assert.True(t, out.Concurrency.IsZero())
+		assert.Equal(t, 0, out.Concurrency.Limit)
 	})
 
 	t.Run("Should handle simple yaml anchors", func(t *testing.T) {
@@ -69,7 +109,12 @@ func TestParse(t *testing.T) {
 		assert.Empty(t, out.Steps.ContainerList[0].When.Constraints)
 		assert.Equal(t, "notify_success", out.Steps.ContainerList[1].Name)
 		assert.Equal(t, "plugins/slack", out.Steps.ContainerList[1].Image)
-		assert.Equal(t, yaml_base_types.StringOrSlice{"success"}, out.Steps.ContainerList[1].When.Constraints[0].Event)
+		assert.Equal(t, yaml_base_types.StringOrSlice{"push"}, out.Steps.ContainerList[1].When.Constraints[0].Event)
+	})
+
+	t.Run("Should handle deeply nested yaml", func(t *testing.T) {
+		_, err := ParseString(sampleDeepYaml)
+		assert.NoError(t, err)
 	})
 }
 
@@ -148,14 +193,10 @@ pipeline:
 `
 
 	workflow1, err := ParseString(sampleYamlPipeline)
-	if !assert.NoError(t, err) {
-		return
-	}
+	require.NoError(t, err)
 
 	workflow2, err := ParseString(sampleYamlPipelineLegacyIgnore)
-	if !assert.NoError(t, err) {
-		return
-	}
+	require.NoError(t, err)
 
 	assert.EqualValues(t, workflow1, workflow2)
 	assert.Len(t, workflow1.Steps.ContainerList, 1)
@@ -168,11 +209,10 @@ when:
   - event:
     - tester
     - tester2
+    status: [ success, failure ]
   - branch:
     - tester
-build:
-  context: .
-  dockerfile: Dockerfile
+    status: [ success, failure ]
 workspace:
   path: src/github.com/octocat/hello-world
   base: /go
@@ -184,14 +224,15 @@ steps:
       - go test
   build:
     image: golang
-    network_mode: container:name
     commands:
       - go build
     when:
       event: push
+    depends_on: []
   notify:
     image: slack
-    channel: dev
+    settings:
+      channel: dev
     when:
       event: failure
 services:
@@ -203,9 +244,7 @@ labels:
 depends_on:
   - lint
   - test
-runs_on:
-  - success
-  - failure
+concurrency: 1
 `
 
 var simpleYamlAnchors = `
@@ -217,39 +256,165 @@ steps:
 `
 
 var sampleVarYaml = `
-_slack: &SLACK
+variables: &SLACK
   image: plugins/slack
 steps:
   notify_fail: *SLACK
   notify_success:
     << : *SLACK
     when:
-      event: success
+      event: push
+  echo:
+    when:
+    - path: wow.sh
+      repo: "test"
+      branch:
+        exclude: main
+    - path:
+      - test.yaml
+      - test.zig
+    - path:
+        exclude: a
+        on_empty: true
+    - ref: ref/tags/v1
+      path:
+  env:
+    image: print
+    environment:
+      DRIVER: next
+      PLATFORM: linux
+concurrency:
+  limit: 1
+  group: test
 `
 
-var sampleSliceYaml = `
+var sampleDeepYaml = `
+image: hello-world
+when:
+  - branch:
+    - tester
 steps:
-  nil_slice:
-    image: plugins/slack
-  empty_slice:
-    image: plugins/slack
-    depends_on: []
+  test:
+    image: golang
+    commands:
+      - go install
+      - go test
+    backend_options:
+      kubernetes:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: accelerator
+                      operator: In
+                      values:
+                        - nvidia-tesla-v100
 `
+
+func TestReSerialize(t *testing.T) {
+	work1, err := ParseString(sampleVarYaml)
+	require.NoError(t, err)
+
+	work1Bin, err := yaml.Marshal(work1)
+	require.NoError(t, err)
+
+	assert.EqualValues(t, `steps:
+    - name: notify_fail
+      image: plugins/slack
+    - name: notify_success
+      image: plugins/slack
+      when:
+        event: push
+    - name: echo
+      when:
+        - repo: test
+          branch:
+            exclude: main
+          path: wow.sh
+        - path:
+            - test.yaml
+            - test.zig
+        - path:
+            exclude: a
+        - ref: ref/tags/v1
+    - name: env
+      image: print
+      environment:
+        DRIVER: next
+        PLATFORM: linux
+concurrency:
+    limit: 1
+    group: test
+`, string(work1Bin))
+
+	work2, err := ParseString(sampleYaml)
+	require.NoError(t, err)
+
+	workBin2, err := yaml.Marshal(work2)
+	require.NoError(t, err)
+
+	// `depends_on: []` on the build step round-trips intact; an empty
+	// list keeps the step in DAG mode rather than silently dropping back
+	// to sequential.
+	assert.EqualValues(t, `when:
+    - status:
+        - success
+        - failure
+      event:
+        - tester
+        - tester2
+    - branch: tester
+      status:
+        - success
+        - failure
+workspace:
+    base: /go
+    path: src/github.com/octocat/hello-world
+steps:
+    - name: test
+      image: golang
+      commands:
+        - go install
+        - go test
+    - name: build
+      image: golang
+      commands: go build
+      depends_on: []
+      when:
+        event: push
+    - name: notify
+      image: slack
+      settings:
+        channel: dev
+      when:
+        event: failure
+services:
+    - name: database
+      image: mysql
+labels:
+    com.example.team: frontend
+    com.example.type: build
+depends_on:
+    - lint
+    - test
+concurrency: 1
+`, string(workBin2))
+}
 
 func TestSlice(t *testing.T) {
-	t.Run("should marshal a not set slice to nil", func(t *testing.T) {
-		out, err := ParseString(sampleSliceYaml)
-		assert.NoError(t, err)
+	out, err := ParseString(sampleYaml)
+	require.NoError(t, err)
 
+	t.Run("should marshal a not set slice to nil", func(t *testing.T) {
+		assert.Equal(t, "test", out.Steps.ContainerList[0].Name)
 		assert.Nil(t, out.Steps.ContainerList[0].DependsOn)
 		assert.Empty(t, out.Steps.ContainerList[0].DependsOn)
 	})
 
 	t.Run("should marshal an empty slice", func(t *testing.T) {
-		out, err := ParseString(sampleSliceYaml)
-		assert.NoError(t, err)
-
+		assert.Equal(t, "build", out.Steps.ContainerList[1].Name)
 		assert.NotNil(t, out.Steps.ContainerList[1].DependsOn)
-		assert.Empty(t, (out.Steps.ContainerList[1].DependsOn))
+		assert.Empty(t, out.Steps.ContainerList[1].DependsOn)
 	})
 }

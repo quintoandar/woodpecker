@@ -16,17 +16,22 @@ package linter
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
 
-	"codeberg.org/6543/xyaml"
 	"go.uber.org/multierr"
 
-	"go.woodpecker-ci.org/woodpecker/v3/pipeline/errors"
-	errorTypes "go.woodpecker-ci.org/woodpecker/v3/pipeline/errors/types"
+	pipeline_errors "go.woodpecker-ci.org/woodpecker/v3/pipeline/errors"
+	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/linter/schema"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/types"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml/utils"
 	"go.woodpecker-ci.org/woodpecker/v3/shared/constant"
 )
+
+// networkModeNone is a const we use to check to allow to drop network completely
+// this should be exempt from privileged action as it makes the container even more unprivileged.
+const networkModeNone = "none"
 
 // A Linter lints a pipeline configuration.
 type Linter struct {
@@ -94,6 +99,9 @@ func (l *Linter) lintFile(config *WorkflowConfig) error {
 	if err := l.lintContainers(config, "services"); err != nil {
 		linterErr = multierr.Append(linterErr, err)
 	}
+	if err := l.lintServiceNames(config); err != nil {
+		linterErr = multierr.Append(linterErr, err)
+	}
 
 	if err := l.lintSchema(config); err != nil {
 		linterErr = multierr.Append(linterErr, err)
@@ -121,13 +129,39 @@ func (l *Linter) lintCloneSteps(config *WorkflowConfig) error {
 	var linterErr error
 	for _, container := range config.Workflow.Clone.ContainerList {
 		if !utils.MatchImageDynamic(container.Image, trustedClonePlugins...) {
-			linterErr = multierr.Append(linterErr,
+			linterErr = multierr.Append(
+				linterErr,
 				newLinterError(
 					"Specified clone image does not match allow list, netrc is not injected",
-					config.File, fmt.Sprintf("clone.%s", container.Name), true),
+					config.File, fmt.Sprintf("clone.%s", container.Name), true,
+				),
 			)
 		}
 	}
+	return linterErr
+}
+
+// lintServiceNames rejects services sharing a name. A service's name becomes
+// the network alias other containers address it by, so two services with the
+// same name make that hostname resolve to either of them at random.
+func (l *Linter) lintServiceNames(config *WorkflowConfig) error {
+	var linterErr error
+
+	seen := make(map[string]struct{}, len(config.Workflow.Services.ContainerList))
+	for _, container := range config.Workflow.Services.ContainerList {
+		if _, ok := seen[container.Name]; ok {
+			linterErr = multierr.Append(
+				linterErr,
+				newLinterError(
+					fmt.Sprintf("Service names must be unique, `%s` is used more than once", container.Name),
+					config.File, fmt.Sprintf("services.%s", container.Name), false,
+				),
+			)
+			continue
+		}
+		seen[container.Name] = struct{}{}
+	}
+
 	return linterErr
 }
 
@@ -175,14 +209,18 @@ func (l *Linter) lintDependsOn(config *WorkflowConfig, c *types.Container, area 
 	}
 
 	var linterErr error
-check:
 	for _, dep := range c.DependsOn {
-		for _, step := range config.Workflow.Steps.ContainerList {
-			if dep == step.Name {
-				continue check
-			}
+		if slices.ContainsFunc(
+			config.Workflow.Steps.ContainerList,
+			func(step *types.Container) bool { return dep.Name == step.Name },
+		) {
+			continue
 		}
-		linterErr = multierr.Append(linterErr,
+		if dep.Optional {
+			continue
+		}
+		linterErr = multierr.Append(
+			linterErr,
 			newLinterError(
 				"One or more of the specified dependencies do not exist",
 				config.File, fmt.Sprintf("%s.%s.depends_on", area, c.Name), false,
@@ -201,7 +239,7 @@ func (l *Linter) lintImage(config *WorkflowConfig, c *types.Container, area stri
 
 func (l *Linter) lintPrivilegedPlugins(config *WorkflowConfig, c *types.Container, area string) error {
 	// lint for conflicts of https://github.com/woodpecker-ci/woodpecker/pull/3918
-	if utils.MatchImage(c.Image, "plugins/docker", "plugins/gcr", "plugins/ecr", "woodpeckerci/plugin-docker-buildx") {
+	if utils.MatchImage(c.Image, "plugins/docker", "plugins/gcr", "plugins/ecr", "woodpeckerci/plugin-docker-buildx") && !c.Privileged {
 		msg := fmt.Sprintf("The formerly privileged plugin `%s` is no longer privileged by default, if required, add it to `WOODPECKER_PLUGINS_PRIVILEGED`", c.Image)
 		// check first if user did not add them back
 		if l.privilegedPlugins != nil && !utils.MatchImageDynamic(c.Image, *l.privilegedPlugins...) {
@@ -231,20 +269,8 @@ func (l *Linter) lintSettings(config *WorkflowConfig, c *types.Container, field 
 	return nil
 }
 
-func (l *Linter) lintContainerDeprecations(config *WorkflowConfig, c *types.Container, field string) (err error) {
-	if len(c.Secrets) != 0 {
-		err = multierr.Append(err, &errorTypes.PipelineError{
-			Type:    errorTypes.PipelineErrorTypeDeprecation,
-			Message: "Usage of `secrets` is deprecated, use `environment` in combination with `from_secret`",
-			Data: errors.DeprecationErrorData{
-				File:  config.File,
-				Field: fmt.Sprintf("%s.%s.secrets", field, c.Name),
-				Docs:  "https://woodpecker-ci.org/docs/usage/secrets#use-secrets-in-settings-and-environment",
-			},
-		})
-	}
-
-	return err
+func (l *Linter) lintContainerDeprecations(config *WorkflowConfig, c *types.Container, field string) error {
+	return nil
 }
 
 func (l *Linter) lintTrusted(config *WorkflowConfig, c *types.Container, area string) error {
@@ -265,7 +291,7 @@ func (l *Linter) lintTrusted(config *WorkflowConfig, c *types.Container, area st
 		if len(c.ExtraHosts) != 0 {
 			errors = append(errors, "Insufficient trust level to use `extra_hosts`")
 		}
-		if len(c.NetworkMode) != 0 {
+		if len(c.NetworkMode) != 0 && c.NetworkMode != networkModeNone {
 			errors = append(errors, "Insufficient trust level to use `network_mode`")
 		}
 	}
@@ -310,19 +336,72 @@ func (l *Linter) lintSchema(config *WorkflowConfig) error {
 	return linterErr
 }
 
-func (l *Linter) lintDeprecations(config *WorkflowConfig) (err error) {
+func (l *Linter) lintDeprecations(config *WorkflowConfig) error {
 	parsed := new(types.Workflow)
-	err = xyaml.Unmarshal([]byte(config.RawConfig), parsed)
+	err := yaml.Unmarshal([]byte(config.RawConfig), parsed)
 	if err != nil {
 		return err
 	}
 
-	return nil
+	if len(parsed.RunsOn) > 0 { //nolint:staticcheck
+		err = multierr.Append(err, &pipeline_errors.PipelineError{
+			Type:      pipeline_errors.PipelineErrorTypeDeprecation,
+			IsWarning: true,
+			Message:   "Usage of `runs_on` is deprecated, use `when.status`",
+			Data: pipeline_errors.DeprecationErrorData{
+				File:  config.File,
+				Field: fmt.Sprintf("%s.runs_on", config.File),
+				Docs:  "https://woodpecker-ci.org/docs/usage/workflow-syntax#status",
+			},
+		})
+	}
+
+	for _, dep := range deprecatedEnvVars {
+		// TODO in next major: make this a failing lint error (IsWarning: false)
+		// instead of a warning; only remove the scan once the env vars themselves
+		// are removed (the major after).
+		if dep.re.MatchString(config.RawConfig) {
+			err = multierr.Append(err, &pipeline_errors.PipelineError{
+				Type:      pipeline_errors.PipelineErrorTypeDeprecation,
+				IsWarning: true,
+				Message:   fmt.Sprintf("Usage of `%s` is deprecated, use `%s`", dep.old, dep.replacement),
+				Data: pipeline_errors.DeprecationErrorData{
+					File:  config.File,
+					Field: config.File,
+					Docs:  "https://woodpecker-ci.org/docs/usage/environment",
+				},
+			})
+		}
+	}
+
+	return err
+}
+
+// deprecatedEnvVars lists env vars that are deprecated but still emitted as
+// aliases. The linter warns when a config references one of them.
+// TODO in next major: escalate the warning above to a failing lint error
+// before the env vars are actually removed.
+var deprecatedEnvVars = []struct {
+	old         string
+	replacement string
+	re          *regexp.Regexp
+}{
+	{"CI_COMMIT_PRERELEASE", "CI_PIPELINE_RELEASE_PRE", deprecatedEnvVarRefRegexp("CI_COMMIT_PRERELEASE")},
+	{"CI_COMMIT_AUTHOR_AVATAR", "CI_PIPELINE_AVATAR", deprecatedEnvVarRefRegexp("CI_COMMIT_AUTHOR_AVATAR")},
+	{"CI_PREV_COMMIT_AUTHOR_AVATAR", "CI_PREV_PIPELINE_AVATAR", deprecatedEnvVarRefRegexp("CI_PREV_COMMIT_AUTHOR_AVATAR")},
+}
+
+// deprecatedEnvVarRefRegexp builds a regexp matching the substitution forms of
+// an env var reference: $NAME, $$NAME and ${NAME}. A trailing word boundary on
+// the bare forms avoids matching longer names (e.g. NAME vs NAME_SUFFIX).
+func deprecatedEnvVarRefRegexp(name string) *regexp.Regexp {
+	q := regexp.QuoteMeta(name)
+	return regexp.MustCompile(`\$\{` + q + `\}|\$\$?` + q + `\b`)
 }
 
 func (l *Linter) lintBadHabits(config *WorkflowConfig) (err error) {
 	parsed := new(types.Workflow)
-	err = xyaml.Unmarshal([]byte(config.RawConfig), parsed)
+	err = yaml.Unmarshal([]byte(config.RawConfig), parsed)
 	if err != nil {
 		return err
 	}
@@ -338,8 +417,10 @@ func (l *Linter) lintBadHabits(config *WorkflowConfig) (err error) {
 		// root whens do not necessarily have an event filter, check steps
 		for _, step := range parsed.Steps.ContainerList {
 			var field string
+			var msg string
 			if len(step.When.Constraints) == 0 {
 				field = fmt.Sprintf("steps.%s", step.Name)
+				msg = "Consider adding a `when` block with an `event` filter to this step or the entire workflow"
 			} else {
 				stepEventIndex := -1
 				for i, c := range step.When.Constraints {
@@ -350,13 +431,14 @@ func (l *Linter) lintBadHabits(config *WorkflowConfig) (err error) {
 				}
 				if stepEventIndex > -1 {
 					field = fmt.Sprintf("steps.%s.when[%d]", step.Name, stepEventIndex)
+					msg = "Set an event filter for all steps or the entire workflow on all items of the `when` block"
 				}
 			}
 			if field != "" {
-				err = multierr.Append(err, &errorTypes.PipelineError{
-					Type:    errorTypes.PipelineErrorTypeBadHabit,
-					Message: "Set an event filter for all steps or the entire workflow on all items of the `when` block",
-					Data: errors.BadHabitErrorData{
+				err = multierr.Append(err, &pipeline_errors.PipelineError{
+					Type:    pipeline_errors.PipelineErrorTypeBadHabit,
+					Message: msg,
+					Data: pipeline_errors.BadHabitErrorData{
 						File:  config.File,
 						Field: field,
 						Docs:  "https://woodpecker-ci.org/docs/usage/linter#event-filter-for-all-steps",

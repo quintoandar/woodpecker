@@ -16,7 +16,9 @@ package token
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/rs/zerolog/log"
@@ -55,13 +57,7 @@ func Parse(allowedTypes []Type, raw string, fn SecretFunc) (*Token, error) {
 		return nil, jwt.ErrTokenUnverifiable
 	}
 
-	hasAllowedType := false
-	for _, k := range allowedTypes {
-		if k == token.Type {
-			hasAllowedType = true
-			break
-		}
-	}
+	hasAllowedType := slices.Contains(allowedTypes, token.Type)
 
 	if !hasAllowedType {
 		return nil, jwt.ErrInvalidType
@@ -75,7 +71,7 @@ func ParseRequest(allowedTypes []Type, r *http.Request, fn SecretFunc) (*Token, 
 	// authorization header.
 	token := r.Header.Get("Authorization")
 	if len(token) != 0 {
-		log.Trace().Msgf("token.ParseRequest: found token in header: %s", token)
+		log.Trace().Msg("token.ParseRequest: found token in header")
 		bearer := token
 		if _, err := fmt.Sscanf(token, "Bearer %s", &bearer); err != nil {
 			return nil, err
@@ -137,9 +133,7 @@ func (t *Token) SignExpires(secret string, exp int64) (string, error) {
 		return "", fmt.Errorf("token claim is not a MapClaims")
 	}
 
-	for k, v := range t.claims {
-		claims[k] = v
-	}
+	maps.Copy(claims, t.claims)
 
 	claims["type"] = t.Type
 	if exp > 0 {

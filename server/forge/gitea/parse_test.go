@@ -29,6 +29,24 @@ import (
 )
 
 func TestGiteaParser(t *testing.T) {
+	pullMetaWebhookRepo := &model.Repo{
+		ForgeRemoteID: "1234",
+		Owner:         "a_nice_user",
+		Name:          "hello_world_ci",
+		FullName:      "a_nice_user/hello_world_ci",
+		Avatar:        "https://gitea.com/avatars/ae32f5573b27f9840942a522d59032b104a2dd15",
+		ForgeURL:      "https://gitea.com/a_nice_user/hello_world_ci",
+		Clone:         "https://gitea.com/a_nice_user/hello_world_ci.git",
+		CloneSSH:      "ssh://git@gitea.com:3344/a_nice_user/hello_world_ci.git",
+		Branch:        "main",
+		PREnabled:     true,
+		Perm: &model.Perm{
+			Pull:  true,
+			Push:  true,
+			Admin: true,
+		},
+	}
+
 	tests := []struct {
 		name  string
 		data  string
@@ -168,11 +186,11 @@ func TestGiteaParser(t *testing.T) {
 				},
 			},
 			pipe: &model.Pipeline{
+				Event:    model.EventTag,
 				Author:   "gordon",
-				Event:    "tag",
 				Commit:   "ef98532add3b2feb7a137426bba1248724367df5",
 				Ref:      "refs/tags/v1.0.0",
-				Message:  "created tag v1.0.0",
+				TagTitle: "v1.0.0",
 				Sender:   "gordon",
 				Avatar:   "https://secure.gravatar.com/avatar/8c58a0be77ee441bb8f8595b7f1b4e87",
 				Email:    "gordon@golang.org",
@@ -333,6 +351,249 @@ func TestGiteaParser(t *testing.T) {
 			},
 		},
 		{
+			name:  "pull-request events should handle a PR title change hook",
+			data:  fixtures.HookPullRequestChangeTitle,
+			event: "pull_request",
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:            "jony",
+				Event:             model.EventPullMetadata,
+				EventReason:       []string{"edited"},
+				Commit:            "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:            "main",
+				Ref:               "refs/pull/7/head",
+				Refspec:           "jony-patch-1:main",
+				Title:             "Edit pull title :D",
+				Message:           "Edit pull title :D",
+				Sender:            "a_nice_user",
+				Avatar:            "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:             "a_nice_user@noreply.example.org",
+				ForgeURL:          "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels: []string{},
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR body change hook",
+			data:  fixtures.HookPullRequestChangeBody,
+			event: "pull_request",
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:            "jony",
+				Event:             model.EventPullMetadata,
+				EventReason:       []string{"edited"},
+				Commit:            "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:            "main",
+				Ref:               "refs/pull/7/head",
+				Refspec:           "jony-patch-1:main",
+				Title:             "somepull",
+				Message:           "somepull",
+				Sender:            "a_nice_user",
+				Avatar:            "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:             "a_nice_user@noreply.example.org",
+				ForgeURL:          "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels: []string{},
+			},
+		},
+		{
+			name: "pull-request events should ignore a PR add review request hook",
+			data: fixtures.HookPullRequestAddReviewRequest,
+			err:  &types.ErrIgnoreEvent{},
+		},
+		{
+			name: "pull-request events should ignore a PR add approval review request hook",
+			data: fixtures.HookPullRequestReviewAck,
+			err:  &types.ErrIgnoreEvent{},
+		},
+		{
+			name: "pull-request events should ignore a PR add reject review request hook",
+			data: fixtures.HookPullRequestReviewDeny,
+			err:  &types.ErrIgnoreEvent{},
+		},
+		{
+			name: "pull-request events should ignore a PR add comment review request hook",
+			data: fixtures.HookPullRequestReviewComment,
+			err:  &types.ErrIgnoreEvent{},
+		},
+		{
+			name:  "pull-request events should handle a PR add label hook",
+			data:  fixtures.HookPullRequestAddLabel,
+			event: "pull_request", // type: pull_request_label
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:            "jony",
+				Event:             model.EventPullMetadata,
+				EventReason:       []string{"label_updated"},
+				Commit:            "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:            "main",
+				Ref:               "refs/pull/7/head",
+				Refspec:           "jony-patch-1:main",
+				Title:             "somepull",
+				Message:           "somepull",
+				Sender:            "a_nice_user",
+				Avatar:            "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:             "a_nice_user@noreply.example.org",
+				ForgeURL:          "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels: []string{"bug", "help wanted"},
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR change label hook",
+			data:  fixtures.HookPullRequestChangeLabel,
+			event: "pull_request", // type: pull_request_label
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:            "jony",
+				Event:             model.EventPullMetadata,
+				EventReason:       []string{"label_updated"},
+				Commit:            "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:            "main",
+				Ref:               "refs/pull/7/head",
+				Refspec:           "jony-patch-1:main",
+				Title:             "somepull",
+				Message:           "somepull",
+				Sender:            "a_nice_user",
+				Avatar:            "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:             "a_nice_user@noreply.example.org",
+				ForgeURL:          "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels: []string{"bug"},
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR remove label hook",
+			data:  fixtures.HookPullRequestRemoveLabel,
+			event: "pull_request", // type: pull_request_label
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:            "jony",
+				Event:             model.EventPullMetadata,
+				EventReason:       []string{"label_cleared"},
+				Commit:            "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:            "main",
+				Ref:               "refs/pull/7/head",
+				Refspec:           "jony-patch-1:main",
+				Title:             "somepull",
+				Message:           "somepull",
+				Sender:            "a_nice_user",
+				Avatar:            "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:             "a_nice_user@noreply.example.org",
+				ForgeURL:          "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels: []string{},
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR add milestone hook",
+			data:  fixtures.HookPullRequestAddMile,
+			event: "pull_request", // type: pull_request_milestone
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:               "jony",
+				Event:                model.EventPullMetadata,
+				EventReason:          []string{"milestoned"},
+				Commit:               "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:               "main",
+				Ref:                  "refs/pull/7/head",
+				Refspec:              "jony-patch-1:main",
+				Title:                "somepull",
+				Message:              "somepull",
+				Sender:               "a_nice_user",
+				Avatar:               "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:                "a_nice_user@noreply.example.org",
+				ForgeURL:             "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels:    []string{"bug", "help wanted"},
+				PullRequestMilestone: "new mile",
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR change milestone hook",
+			data:  fixtures.HookPullRequestChangeMile,
+			event: "pull_request", // type: pull_request_milestone
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:               "jony",
+				Event:                model.EventPullMetadata,
+				EventReason:          []string{"milestoned"},
+				Commit:               "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:               "main",
+				Ref:                  "refs/pull/7/head",
+				Refspec:              "jony-patch-1:main",
+				Title:                "somepull",
+				Message:              "somepull",
+				Sender:               "a_nice_user",
+				Avatar:               "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:                "a_nice_user@noreply.example.org",
+				ForgeURL:             "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels:    []string{"bug", "help wanted"},
+				PullRequestMilestone: "closed mile",
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR remove milestone hook",
+			data:  fixtures.HookPullRequestRemoveMile,
+			event: "pull_request", // type: pull_request_milestone
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:               "jony",
+				Event:                model.EventPullMetadata,
+				EventReason:          []string{"demilestoned"},
+				Commit:               "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:               "main",
+				Ref:                  "refs/pull/7/head",
+				Refspec:              "jony-patch-1:main",
+				Title:                "somepull",
+				Message:              "somepull",
+				Sender:               "a_nice_user",
+				Avatar:               "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:                "a_nice_user@noreply.example.org",
+				ForgeURL:             "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels:    []string{"bug", "help wanted"},
+				PullRequestMilestone: "",
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR add assignee hook",
+			data:  fixtures.HookPullRequestAssigneesAdded,
+			event: "pull_request", // type: pull_request_assign
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:            "jony",
+				Event:             model.EventPullMetadata,
+				EventReason:       []string{"assigned"},
+				Commit:            "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:            "main",
+				Ref:               "refs/pull/7/head",
+				Refspec:           "jony-patch-1:main",
+				Title:             "somepull",
+				Message:           "somepull",
+				Sender:            "a_nice_user",
+				Avatar:            "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:             "a_nice_user@noreply.example.org",
+				ForgeURL:          "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels: []string{"bug"},
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR remove assignee hook",
+			data:  fixtures.HookPullRequestAssigneesRemoved,
+			event: "pull_request", // type: pull_request_assign
+			repo:  pullMetaWebhookRepo,
+			pipe: &model.Pipeline{
+				Author:            "jony",
+				Event:             model.EventPullMetadata,
+				EventReason:       []string{"unassigned"},
+				Commit:            "07977177c2cd7d46bad37b8472a9d50e7acb9d1f",
+				Branch:            "main",
+				Ref:               "refs/pull/7/head",
+				Refspec:           "jony-patch-1:main",
+				Title:             "somepull",
+				Message:           "somepull",
+				Sender:            "a_nice_user",
+				Avatar:            "https://gitea.com/avatars/81027235e996f5e3ef6257152357b85d94171a2e",
+				Email:             "a_nice_user@noreply.example.org",
+				ForgeURL:          "https://gitea.com/a_nice_user/hello_world_ci/pulls/7",
+				PullRequestLabels: []string{"bug"},
+			},
+		},
+		{
 			name:  "pull-request events should handle a PR closed hook when PR was merged",
 			data:  fixtures.HookPullRequestMerged,
 			event: "pull_request",
@@ -392,11 +653,14 @@ func TestGiteaParser(t *testing.T) {
 				},
 			},
 			pipe: &model.Pipeline{
+				Event: model.EventRelease,
+				Release: &model.Release{
+					Title: "Version 0.0.5",
+				},
 				Author:   "anbraten",
-				Event:    "release",
 				Branch:   "main",
 				Ref:      "refs/tags/0.0.5",
-				Message:  "created release Version 0.0.5",
+				TagTitle: "0.0.5",
 				Sender:   "anbraten",
 				Avatar:   "https://git.xxx/user/avatar/anbraten/-1",
 				Email:    "anbraten@noreply.xxx",
@@ -405,24 +669,24 @@ func TestGiteaParser(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			req, _ := http.NewRequest(http.MethodPost, "/api/hook", bytes.NewBufferString(tc.data))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodPost, "/api/hook", bytes.NewBufferString(tt.data))
 			req.Header = http.Header{}
-			req.Header.Set(hookEvent, tc.event)
+			req.Header.Set(hookEvent, tt.event)
 			r, p, err := parseHook(req)
-			if tc.err != nil {
-				assert.ErrorIs(t, err, tc.err)
+			if tt.err != nil {
+				assert.ErrorIs(t, err, tt.err)
 			} else if assert.NoError(t, err) {
-				assert.EqualValues(t, tc.repo, r)
+				assert.EqualValues(t, tt.repo, r)
 				p.Timestamp = 0
-				assert.EqualValues(t, tc.pipe, p)
+				assert.EqualValues(t, tt.pipe, p)
 			}
 		})
 	}
 }
 
-func Test_parsePullRequestDraft(t *testing.T) {
+func TestParsePullRequestDraft(t *testing.T) {
 	payload := strings.Replace(
 		fixtures.HookPullRequest,
 		`"state": "open",`,
@@ -437,5 +701,42 @@ func Test_parsePullRequestDraft(t *testing.T) {
 	assert.NoError(t, err)
 	if assert.NotNil(t, p) {
 		assert.True(t, p.PullRequestDraft)
+	}
+}
+
+func TestParseIncompleteHookPayloads(t *testing.T) {
+	incomplete := []string{
+		`{}`,
+		`{"repository": {}}`,
+		`{"repository": {"full_name": "noslash"}, "sender": {}}`,
+	}
+	for _, payload := range incomplete {
+		t.Run(payload, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				_, _, err := parsePushHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parseCreatedHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parsePullRequestHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parseReleaseHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+			})
+		})
+	}
+
+	incompletePullRequest := []string{
+		`{"repository": {"full_name": "a/b", "owner": {}}, "sender": {}, "action": "opened", "pull_request": {}}`,
+		`{"repository": {"full_name": "a/b", "owner": {}}, "sender": {}, "action": "opened", "pull_request": {"user": {}}}`,
+	}
+	for _, payload := range incompletePullRequest {
+		t.Run(payload, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				_, _, err := parsePullRequestHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parseReleaseHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+			})
+		})
 	}
 }

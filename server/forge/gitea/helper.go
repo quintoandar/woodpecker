@@ -54,6 +54,9 @@ func toRepo(from *gitea.Repository) *model.Repo {
 
 // toPerm converts a Gitea permission to a Woodpecker permission.
 func toPerm(from *gitea.Permission) *model.Perm {
+	if from == nil {
+		return &model.Perm{}
+	}
 	return &model.Perm{
 		Pull:  from.Pull,
 		Push:  from.Push,
@@ -64,7 +67,7 @@ func toPerm(from *gitea.Permission) *model.Perm {
 // toTeam converts a Gitea team to a Woodpecker team.
 func toTeam(from *gitea.Organization, link string) *model.Team {
 	return &model.Team{
-		Login:  from.UserName,
+		Login:  from.Name,
 		Avatar: expandAvatar(link, from.AvatarURL),
 	}
 }
@@ -130,10 +133,10 @@ func pipelineFromTag(hook *pushHook) *model.Pipeline {
 
 	return &model.Pipeline{
 		Event:     model.EventTag,
+		TagTitle:  ref,
 		Commit:    hook.Sha,
 		Ref:       fmt.Sprintf("refs/tags/%s", ref),
 		ForgeURL:  fmt.Sprintf("%s/src/tag/%s", hook.Repo.HTMLURL, ref),
-		Message:   fmt.Sprintf("created tag %s", ref),
 		Avatar:    avatar,
 		Author:    hook.Sender.UserName,
 		Sender:    hook.Sender.UserName,
@@ -150,8 +153,17 @@ func pipelineFromPullRequest(hook *pullRequestHook) *model.Pipeline {
 	)
 
 	event := model.EventPull
-	if hook.Action == actionClose {
+	switch hook.Action {
+	case actionClose:
 		event = model.EventPullClosed
+	case actionEdited,
+		actionLabelUpdate,
+		actionLabelCleared,
+		actionMilestoned,
+		actionDeMilestoned,
+		actionAssigned,
+		actionUnAssigned:
+		event = model.EventPullMetadata
 	}
 
 	pipeline := &model.Pipeline{
@@ -166,16 +178,29 @@ func pipelineFromPullRequest(hook *pullRequestHook) *model.Pipeline {
 		Sender:   hook.Sender.UserName,
 		Email:    hook.Sender.Email,
 		Title:    hook.PullRequest.Title,
-		Refspec: fmt.Sprintf("%s:%s",
+		Refspec: fmt.Sprintf(
+			"%s:%s",
 			hook.PullRequest.Head.Ref,
 			hook.PullRequest.Base.Ref,
 		),
-		PullRequestLabels: convertLabels(hook.PullRequest.Labels),
-		PullRequestDraft:  hook.PullRequest.Draft,
-		FromFork:          hook.PullRequest.Head.RepoID != hook.PullRequest.Base.RepoID,
+		PullRequestLabels:    convertLabels(hook.PullRequest.Labels),
+		PullRequestMilestone: convertMilestone(hook.PullRequest.Milestone),
+		PullRequestDraft:     hook.PullRequest.Draft,
+		FromFork:             hook.PullRequest.Head.RepoID != hook.PullRequest.Base.RepoID,
+	}
+
+	if pipeline.Event == model.EventPullMetadata {
+		pipeline.EventReason = []string{hook.Action}
 	}
 
 	return pipeline
+}
+
+func convertMilestone(milestone *gitea.Milestone) string {
+	if milestone == nil || milestone.ID == 0 {
+		return ""
+	}
+	return milestone.Title
 }
 
 func pipelineFromRelease(hook *releaseHook) *model.Pipeline {
@@ -185,16 +210,19 @@ func pipelineFromRelease(hook *releaseHook) *model.Pipeline {
 	)
 
 	return &model.Pipeline{
-		Event:        model.EventRelease,
-		Ref:          fmt.Sprintf("refs/tags/%s", hook.Release.TagName),
-		ForgeURL:     hook.Release.HTMLURL,
-		Branch:       hook.Release.Target,
-		Message:      fmt.Sprintf("created release %s", hook.Release.Title),
-		Avatar:       avatar,
-		Author:       hook.Sender.UserName,
-		Sender:       hook.Sender.UserName,
-		Email:        hook.Sender.Email,
-		IsPrerelease: hook.Release.IsPrerelease,
+		Event:    model.EventRelease,
+		Ref:      fmt.Sprintf("refs/tags/%s", hook.Release.TagName),
+		ForgeURL: hook.Release.HTMLURL,
+		Branch:   hook.Release.Target,
+		Avatar:   avatar,
+		Author:   hook.Sender.UserName,
+		Sender:   hook.Sender.UserName,
+		Email:    hook.Sender.Email,
+		Release: &model.Release{
+			Title:        hook.Release.Title,
+			IsPrerelease: hook.Release.IsPrerelease,
+		},
+		TagTitle: hook.Release.TagName,
 	}
 }
 

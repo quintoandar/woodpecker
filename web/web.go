@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//go:build !external_web
+
 package web
 
 import (
@@ -21,7 +23,7 @@ import (
 	"net/http"
 )
 
-//go:embed dist/*
+//go:embed all:dist/*
 var webFiles embed.FS
 
 func HTTPFS() (http.FileSystem, error) {

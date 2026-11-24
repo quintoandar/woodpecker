@@ -5,7 +5,7 @@ when:
       - release/*
 
 variables:
-  - &node_image 'docker.io/node:23-alpine'
+  - &node_image 'docker.io/node:26-alpine'
   - &when
     path:
       # related config files
@@ -20,20 +20,10 @@ steps:
     image: *node_image
     directory: web/
     commands:
-      - corepack enable
+      - npx get-pnpm
+      - export PNPM_HOME='/root/.local/share/pnpm'
+      - export PATH="$PNPM_HOME/bin:$PATH"
       - pnpm install --frozen-lockfile
-    when: *when
-
-  prettier:
-    depends_on:
-      - install-dependencies
-    image: docker.io/woodpeckerci/plugin-prettier:next
-    pull: true
-    settings:
-      version: 3.3.3
-      plugins:
-        - 'prettier-plugin-tailwindcss'
-        - '@ianvs/prettier-plugin-sort-imports'
     when: *when
 
   lint:
@@ -42,7 +32,9 @@ steps:
     image: *node_image
     directory: web/
     commands:
-      - corepack enable
+      - npx get-pnpm
+      - export PNPM_HOME='/root/.local/share/pnpm'
+      - export PATH="$PNPM_HOME/bin:$PATH"
       - pnpm lint
     when: *when
 
@@ -52,7 +44,9 @@ steps:
     image: *node_image
     directory: web/
     commands:
-      - corepack enable
+      - npx get-pnpm
+      - export PNPM_HOME='/root/.local/share/pnpm'
+      - export PATH="$PNPM_HOME/bin:$PATH"
       - pnpm format:check
     when: *when
 
@@ -62,7 +56,9 @@ steps:
     image: *node_image
     directory: web/
     commands:
-      - corepack enable
+      - npx get-pnpm
+      - export PNPM_HOME='/root/.local/share/pnpm'
+      - export PATH="$PNPM_HOME/bin:$PATH"
       - pnpm typecheck
     when: *when
 
@@ -73,6 +69,8 @@ steps:
     image: *node_image
     directory: web/
     commands:
-      - corepack enable
+      - npx get-pnpm
+      - export PNPM_HOME='/root/.local/share/pnpm'
+      - export PATH="$PNPM_HOME/bin:$PATH"
       - pnpm test
     when: *when

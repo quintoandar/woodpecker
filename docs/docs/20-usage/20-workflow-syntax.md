@@ -196,6 +196,8 @@ Some of the steps may be allowed to fail without causing the whole workflow and 
 +    failure: ignore
 ```
 
+If you would like to cancel the full pipeline once the step fails, you can set `failure: cancel`. For the default behaviour, use `failure: fail`.
+
 ### `when` - Conditional Execution
 
 Woodpecker supports defining a list of conditions for a step by using a `when` block. If at least one of the conditions in the `when` block evaluate to true the step is executed, otherwise it is skipped. A condition is evaluated to true if _all_ sub-conditions are true.
@@ -284,6 +286,7 @@ The available events are:
 - `push`: triggered when a commit is pushed to a branch.
 - `pull_request`: triggered when a pull request is opened or a new commit is pushed to it.
 - `pull_request_closed`: triggered when a pull request is closed or merged.
+- `pull_request_metadata`: triggered when a pull request metadata has changed (e.g. title, body, label, milestone, ...).
 - `tag`: triggered when a tag is pushed.
 - `release`: triggered when a release, pre-release or draft is created. (You can apply further filters using [evaluate](#evaluate) with [environment variables](./50-environment.md#built-in-environment-variables).)
 - `deployment`: triggered when a deployment is created in the repository. (This event can be triggered from Woodpecker directly. GitHub also supports webhook triggers.)
@@ -339,7 +342,14 @@ when:
 
 #### `status`
 
-There are use cases for executing steps on failure, such as sending notifications for failed workflow/pipeline. Use the status constraint to execute steps even when the workflow fails:
+By default, steps only run when the workflow has succeeded up to that point,<br>
+which is equivalent to `status: [ success ]`.
+
+The `status` filter lets you override this behavior.
+The only accepted values are `success` and `failure`.
+
+A common use case is executing a step on failure, such as sending notifications for a failed workflow/pipeline.
+To run a step regardless of outcome, list both values:
 
 ```diff
  steps:
@@ -348,6 +358,18 @@ There are use cases for executing steps on failure, such as sending notification
 +    when:
 +      - status: [ success, failure ]
 ```
+
+The filter is aware of the other filters. If you want to run on failures if the event is `tag`, but if it's a `pull_request`, run it on both success and failure:
+
+```diff
+ when:
++  - event: tag
++    status: [ failure ]
++  - event: pull_request
++    status: [ success, failure ]
+```
+
+If there's no matching filter at all or all matching filters don't have set `status`, it will use the default, which means it runs on success only. In the example above this will happen if the event is neither `tag` nor `pull_request`.
 
 #### `platform`
 
@@ -392,7 +414,7 @@ when:
 #### `path`
 
 :::info
-Path conditions are applied only to **push** and **pull_request** events. This feature is currently available for all forges except Bitbucket Cloud.
+Path conditions are applied only to **push** and **pull_request** events.
 :::
 
 Execute a step only on a pipeline with certain files being changed:
@@ -404,7 +426,9 @@ when:
 
 You can use [glob patterns](https://github.com/bmatcuk/doublestar#patterns) to match the changed files and specify if the step should run if a file matching that pattern has been changed `include` or if some files have **not** been changed `exclude`.
 
-For pipelines without file changes (empty commits or on events without file changes like `tag`), you can use `on_empty` to set whether this condition should be **true** _(default)_ or **false** in these cases.
+`pull_request` events always contain all changed files of the pull request **not** just the files from the last pushed commit.
+
+For pipelines without file changes (empty commits), you can use `on_empty` to set whether this condition should be **true** _(default)_ or **false** in these cases.
 
 ```yaml
 when:
@@ -496,6 +520,10 @@ steps:
   ...
 ```
 
+:::
+
+:::warning
+As soon as one step uses `depends_on`, steps are looked up by name, so all step names of the workflow must be unique. Duplicate names are rejected.
 :::
 
 ### `volumes`
@@ -611,11 +639,13 @@ You can define labels for your workflow in order to select an agent to execute t
 
 To specify additional agent labels, check the [Agent configuration options](../30-administration/10-configuration/30-agent.md#agent_labels). The agents have at least four default labels: `platform=agent-os/agent-arch`, `hostname=my-agent`, `backend=docker` (type of agent backend) and `repo=*`. Agents can use an `*` as a placeholder for a label. For example, `repo=*` matches any repo.
 
+Administrators can additionally restrict an agent with [agent filters](../30-administration/10-configuration/30-agent.md#agent-filters), so a workflow might not be picked up by an agent even though its own labels match.
+
 Workflow labels with an empty value are ignored.
 By default, each workflow has at least the label `repo=your-user/your-repo-name`. If you have set the [platform attribute](#platform) for your workflow, it will also have a label such as `platform=your-os/your-arch`.
 
 :::warning
-Labels with the `woodpecker-ci.org` prefix are managed by Woodpecker and can not be set as part of the pipeline definition.
+Labels with the `woodpecker-ci.org` prefix are managed by Woodpecker and cannot be set as part of the pipeline definition.
 :::
 
 You can add additional labels as a key value map:
@@ -735,7 +765,10 @@ skip_clone: true
 
 ## `when` - Global workflow conditions
 
-Woodpecker gives the ability to skip whole workflows ([not just steps](#when---conditional-execution)) based on certain conditions by a `when` block. If all conditions in the `when` block evaluate to true the workflow is executed, otherwise it is skipped, but treated as successful and other workflows depending on it will still continue.
+Woodpecker gives the ability to skip whole workflows ([not just steps](#when---conditional-execution)) based on certain conditions by a `when` block.
+If all conditions in the `when` block evaluate to true the workflow is executed, otherwise it is not included in the pipeline.
+Other workflows that have a `depends_on` referencing a skipped workflow will also be excluded.
+Use [`optional: true` on a dependency](./25-workflows.md#optional-dependencies) if you want it to be ignored when the referenced workflow is not part of the pipeline.
 
 For more information about the specific filters, take a look at the [step-specific `when` filters](#when---conditional-execution).
 
@@ -760,9 +793,22 @@ The workflow now triggers on `main`, but also if the target branch of a pull req
 
 Woodpecker supports to define multiple workflows for a repository. Those workflows will run independent from each other. To depend them on each other you can use the [`depends_on`](./25-workflows.md#flow-control) keyword.
 
-## `runs_on`
+### Optional dependencies in `depends_on`
 
-Workflows that should run even on failure should set the `runs_on` tag. See [here](./25-workflows.md#flow-control) for an example.
+Each entry in `depends_on` can be a string (required dependency) or an object with `name` and `optional: true`.
+Optional dependencies are silently ignored when the referenced workflow or step is not part of the pipeline (e.g. filtered out by `when` conditions).
+If present, the workflow waits for them as usual. See [optional dependencies](./25-workflows.md#optional-dependencies) for details.
+
+```yaml
+depends_on:
+  - check-a
+  - name: check-b
+    optional: true
+```
+
+## `concurrency`
+
+By default, workflows run in parallel. See the [Concurrency section](./25-workflows.md#concurrency) for instructions on how to limit parallel execution of workflows.
 
 ## Advanced network options for steps
 
@@ -788,7 +834,7 @@ steps:
 Woodpecker gives the ability to configure privileged mode in the YAML. You can use this parameter to launch containers with escalated capabilities.
 
 :::info
-Privileged mode is only available to trusted repositories and for security reasons should only be used in private environments. See [project settings](./75-project-settings.md#trusted) to enable trusted mode.
+Privileged mode is only available to trusted repositories and for security reasons should only be used in private environments. See [project settings](./75-project-settings.md#trusted) to enable trusted mode. Also see [security boundaries](./17-security-boundaries.md#trusted-repositories).
 :::
 
 ```diff

@@ -2,6 +2,12 @@
 
 Woodpecker has integrated support for matrix workflows. Woodpecker executes a separate workflow for each combination in the matrix, allowing you to build and test against multiple configurations.
 
+:::warning
+Woodpecker generates at most **64 workflows** per matrix.
+The variables are also limited to **10** per axis.
+A matrix with more combinations is rejected with an error.
+:::
+
 Example matrix definition:
 
 ```yaml

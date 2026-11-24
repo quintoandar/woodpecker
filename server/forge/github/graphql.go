@@ -129,7 +129,12 @@ func (c *client) dirGraphQL(ctx context.Context, u *model.User, r *model.Repo, b
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := c.newClientToken(ctx, u.AccessToken).Client().Do(req)
+	httpClient, err := c.newOAuthHTTPClient(ctx, u.AccessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

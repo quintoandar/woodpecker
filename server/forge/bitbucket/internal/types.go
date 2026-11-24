@@ -15,6 +15,8 @@
 package internal
 
 import (
+	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -33,25 +35,31 @@ type Account struct {
 type Workspace struct {
 	UUID  string `json:"uuid"`
 	Slug  string `json:"slug"`
-	Name  string `json:"name"`
 	Type  string `json:"type"`
 	Links Links  `json:"links"`
 }
 
+type WorkspaceAccess struct {
+	Type          string     `json:"type"`
+	Administrator bool       `json:"administrator"`
+	Workspace     *Workspace `json:"workspace"`
+}
+
 type WorkspacesResp struct {
-	Page   int          `json:"page"`
-	Pages  int          `json:"pagelen"`
-	Size   int          `json:"size"`
-	Next   string       `json:"next"`
-	Values []*Workspace `json:"values"`
+	Page   int                `json:"page"`
+	Pages  int                `json:"pagelen"`
+	Size   int                `json:"size"`
+	Next   string             `json:"next"`
+	Values []*WorkspaceAccess `json:"values"`
 }
 
 type PipelineStatus struct {
-	State string `json:"state"`
-	Key   string `json:"key"`
-	Name  string `json:"name,omitempty"`
-	URL   string `json:"url"`
-	Desc  string `json:"description,omitempty"`
+	State   string `json:"state"`
+	Key     string `json:"key"`
+	Name    string `json:"name,omitempty"`
+	URL     string `json:"url"`
+	Desc    string `json:"description,omitempty"`
+	Refname string `json:"refname,omitempty"`
 }
 
 type Email struct {
@@ -221,26 +229,6 @@ func (o *ListOpts) Encode() string {
 	return params.Encode()
 }
 
-type ListWorkspacesOpts struct {
-	Page    int
-	PageLen int
-	Role    string
-}
-
-func (o *ListWorkspacesOpts) Encode() string {
-	params := url.Values{}
-	if o.Page != 0 {
-		params.Set("page", strconv.Itoa(o.Page))
-	}
-	if o.PageLen != 0 {
-		params.Set("pagelen", strconv.Itoa(o.PageLen))
-	}
-	if len(o.Role) != 0 {
-		params.Set("role", o.Role)
-	}
-	return params.Encode()
-}
-
 type Error struct {
 	Status int
 	Body   struct {
@@ -249,6 +237,9 @@ type Error struct {
 }
 
 func (e Error) Error() string {
+	if e.Body.Message == "" {
+		return fmt.Sprintf("bitbucket responded with HTTP %d %s", e.Status, http.StatusText(e.Status))
+	}
 	return e.Body.Message
 }
 
@@ -307,4 +298,18 @@ type Dir struct {
 	Path string `json:"path"`
 	Type string `json:"type"`
 	Size uint   `json:"size"`
+}
+
+type DiffStatResp struct {
+	Next   *string `json:"next"`
+	Values []*Diff `json:"values"`
+}
+
+type Diff struct {
+	Old *DiffFile `json:"old"`
+	New *DiffFile `json:"new"`
+}
+
+type DiffFile struct {
+	Path string `json:"path"`
 }

@@ -15,10 +15,21 @@
         devShells.default =
           with pkgs;
           let
-            go = go_1_24;
+            go = go_1_27;
+
+            # rebuild Go based tools with the go version above
+            buildGoModule = pkgs.buildGoModule.override { inherit go; };
+            withGo =
+              pkg:
+              let
+                builderArgs = lib.filterAttrs (name: _: lib.hasPrefix "buildGo" name) (
+                  if pkg ? override then lib.functionArgs pkg.override else { }
+                );
+              in
+              if builderArgs == { } then pkg else pkg.override (lib.mapAttrs (_: _: buildGoModule) builderArgs);
           in
           pkgs.mkShell {
-            buildInputs = [
+            buildInputs = map withGo [
               # generic
               gnumake
               gnutar
@@ -29,15 +40,14 @@
               # frontend
               nodejs_24
               pnpm
-              nodePackages.typescript
-              nodePackages.typescript-language-server
+              typescript
+              typescript-language-server
 
               # backend
               go
-              glibc.static
               gofumpt
               golangci-lint
-              go-mockery_2
+              go-mockery
               protobuf
               sqlite
               go-swag # for generate-openapi
@@ -45,11 +55,21 @@
               protoc-gen-go
               protoc-gen-go-grpc
               gcc
+
+              # docs
+              graphviz
+
+              # test env tools
+              bash
+              nushell
+              powershell
             ];
             CFLAGS = "-I${pkgs.glibc.dev}/include";
             LDFLAGS = "-L${pkgs.glibc}/lib";
             GO = "${go}/bin/go";
             GOROOT = "${go}/share/go";
+            STATIC_BUILD = "false";
+            pnpm_config_pm_on_fail = "ignore";
           };
       }
     );

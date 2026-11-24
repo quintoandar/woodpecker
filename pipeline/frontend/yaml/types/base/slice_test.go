@@ -18,14 +18,53 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v4"
 )
 
 type StructStringOrSlice struct {
-	Foo StringOrSlice
+	Foo StringOrSlice `yaml:"foo"`
+	Bar StringOrSlice `yaml:"bar,omitempty"`
 }
 
 func TestStringOrSliceYaml(t *testing.T) {
+	t.Run("unmarshal", func(t *testing.T) {
+		str := `{foo: [bar, baz]}`
+
+		s := StructStringOrSlice{}
+		assert.NoError(t, yaml.Unmarshal([]byte(str), &s))
+
+		assert.Equal(t, StringOrSlice{"bar", "baz"}, s.Foo)
+
+		d, err := yaml.Marshal(&s)
+		assert.NoError(t, err)
+
+		s2 := StructStringOrSlice{}
+		assert.NoError(t, yaml.Unmarshal(d, &s2))
+
+		assert.Equal(t, StringOrSlice{"bar", "baz"}, s2.Foo)
+	})
+
+	t.Run("marshal", func(t *testing.T) {
+		str := StructStringOrSlice{}
+		out, err := yaml.Marshal(str)
+		assert.NoError(t, err)
+		assert.EqualValues(t, "foo: null\n", string(out))
+
+		str = StructStringOrSlice{Foo: []string{"a\""}}
+		out, err = yaml.Marshal(str)
+		assert.NoError(t, err)
+		assert.EqualValues(t, "foo: a\"\n", string(out))
+
+		str = StructStringOrSlice{Foo: []string{"a", "b", "c"}}
+		out, err = yaml.Marshal(str)
+		assert.NoError(t, err)
+		assert.EqualValues(t, `foo:
+    - a
+    - b
+    - c
+`, string(out))
+	})
+
 	str := `{foo: [bar, "baz"]}`
 	s := StructStringOrSlice{}
 	assert.NoError(t, yaml.Unmarshal([]byte(str), &s))

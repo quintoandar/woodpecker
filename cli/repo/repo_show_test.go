@@ -1,3 +1,17 @@
+// Copyright 2025 Woodpecker Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package repo
 
 import (
@@ -15,13 +29,13 @@ import (
 
 func TestRepoShow(t *testing.T) {
 	tests := []struct {
-		name          string
-		repoID        int64
-		mockRepo      *woodpecker.Repo
-		mockError     error
-		expectedError bool
-		expected      *woodpecker.Repo
-		args          []string
+		name      string
+		repoID    int64
+		mockRepo  *woodpecker.Repo
+		mockError error
+		wantErr   bool
+		expected  *woodpecker.Repo
+		args      []string
 	}{
 		{
 			name:     "valid repo by ID",
@@ -38,17 +52,17 @@ func TestRepoShow(t *testing.T) {
 			args:     []string{"show", "owner/repo"},
 		},
 		{
-			name:          "invalid repo ID",
-			repoID:        999,
-			expectedError: true,
-			args:          []string{"show", "invalid"},
-			mockError:     errors.New("repo not found"),
+			name:      "invalid repo ID",
+			repoID:    999,
+			wantErr:   true,
+			args:      []string{"show", "invalid"},
+			mockError: errors.New("repo not found"),
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mockClient := mocks.NewClient(t)
+			mockClient := mocks.NewMockClient(t)
 			mockClient.On("Repo", tt.repoID).Return(tt.mockRepo, tt.mockError).Maybe()
 			mockClient.On("RepoLookup", "owner/repo").Return(tt.mockRepo, nil).Maybe()
 
@@ -56,7 +70,7 @@ func TestRepoShow(t *testing.T) {
 			command.Writer = io.Discard
 			command.Action = func(_ context.Context, c *cli.Command) error {
 				output, err := repoShow(c, mockClient)
-				if tt.expectedError {
+				if tt.wantErr {
 					assert.Error(t, err)
 					return nil
 				}

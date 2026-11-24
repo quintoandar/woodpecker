@@ -1,3 +1,17 @@
+// Copyright 2024 Woodpecker Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package woodpecker
 
 import (
@@ -9,7 +23,7 @@ const (
 	pathSelf  = "%s/api/user"
 	pathRepos = "%s/api/user/repos"
 	pathUsers = "%s/api/users"
-	pathUser  = "%s/api/users/%s"
+	pathUser  = "%s/api/users/%s?forge_id=%d"
 )
 
 type RepoListOptions struct {
@@ -38,10 +52,13 @@ func (c *client) Self() (*User, error) {
 }
 
 // User returns a user by login.
-func (c *client) User(login string) (*User, error) {
+// It is recommended to specify forgeID (default is 1).
+func (c *client) User(login string, forgeID ...int64) (*User, error) {
 	out := new(User)
-	uri := fmt.Sprintf(pathUser, c.addr, login)
-	err := c.get(uri, out)
+	if len(forgeID) == 0 {
+		forgeID = []int64{defaultForgeID}
+	}
+	err := c.get(fmt.Sprintf(pathUser, c.addr, login, forgeID[0]), out)
 	return out, err
 }
 
@@ -64,17 +81,22 @@ func (c *client) UserPost(in *User) (*User, error) {
 
 // UserPatch updates a user account.
 func (c *client) UserPatch(in *User) (*User, error) {
+	if in.ForgeID < defaultForgeID {
+		in.ForgeID = defaultForgeID
+	}
 	out := new(User)
-	uri := fmt.Sprintf(pathUser, c.addr, in.Login)
+	uri := fmt.Sprintf(pathUser, c.addr, in.Login, in.ForgeID)
 	err := c.patch(uri, in, out)
 	return out, err
 }
 
 // UserDel deletes a user account.
-func (c *client) UserDel(login string) error {
-	uri := fmt.Sprintf(pathUser, c.addr, login)
-	err := c.delete(uri)
-	return err
+// It is recommended to specify forgeID (default is 1).
+func (c *client) UserDel(login string, forgeID ...int64) error {
+	if len(forgeID) == 0 {
+		forgeID = []int64{defaultForgeID}
+	}
+	return c.delete(fmt.Sprintf(pathUser, c.addr, login, forgeID[0]))
 }
 
 // RepoList returns a list of all repositories to which

@@ -146,6 +146,14 @@ func WithEnviron(env map[string]string) Option {
 	}
 }
 
+// WithNonPluginEnviron configures the compiler with environment variables
+// added to non-plugin containers only, but can also be used for filters.
+func WithNonPluginEnviron(env map[string]string) Option {
+	return func(compiler *Compiler) {
+		maps.Copy(compiler.nonPluginEnv, env)
+	}
+}
+
 // WithNetworks configures the compiler with additional networks
 // to be connected to pipeline containers.
 func WithNetworks(networks ...string) Option {
@@ -198,4 +206,11 @@ func WithProxy(opt ProxyOptions) Option {
 			"https_proxy": opt.HTTPSProxy,
 		},
 	)
+}
+
+// TODO: remove with version 4.x
+func WithForceIgnoreServiceFailure() Option {
+	return func(c *Compiler) {
+		c.forceIgnoreServiceFailure = true
+	}
 }

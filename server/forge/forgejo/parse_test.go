@@ -166,11 +166,11 @@ func TestForgejoParser(t *testing.T) {
 				},
 			},
 			pipe: &model.Pipeline{
+				Event:    model.EventTag,
+				TagTitle: "v1.0.0",
 				Author:   "gordon",
-				Event:    "tag",
 				Commit:   "ef98532add3b2feb7a137426bba1248724367df5",
 				Ref:      "refs/tags/v1.0.0",
-				Message:  "created tag v1.0.0",
 				Sender:   "gordon",
 				Avatar:   "https://secure.gravatar.com/avatar/8c58a0be77ee441bb8f8595b7f1b4e87",
 				Email:    "gordon@golang.org",
@@ -294,6 +294,44 @@ func TestForgejoParser(t *testing.T) {
 			},
 		},
 		{
+			name:  "pull-request events should handle a PR edited hook when PR got edited",
+			data:  fixtures.HookPullRequestEdited,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "46534",
+				Owner:         "anbraten",
+				Name:          "test-repo",
+				FullName:      "anbraten/test-repo",
+				Avatar:        "https://seccdn.libravatar.org/avatar/fc9b6fe77c6b732a02925a62a81f05a0?d=identicon",
+				ForgeURL:      "https://forgejo.com/anbraten/test-repo",
+				Clone:         "https://forgejo.com/anbraten/test-repo.git",
+				CloneSSH:      "git@forgejo.com:anbraten/test-repo.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:            "anbraten",
+				Event:             "pull_request_metadata",
+				EventReason:       []string{"edited"},
+				Commit:            "d555a5dd07f4d0148a58d4686ec381502ae6a2d4",
+				Branch:            "main",
+				Ref:               "refs/pull/1/head",
+				Refspec:           "anbraten-patch-1:main",
+				Title:             "Adjust file",
+				Message:           "Adjust file",
+				Sender:            "anbraten",
+				Avatar:            "https://seccdn.libravatar.org/avatar/fc9b6fe77c6b732a02925a62a81f05a0?d=identicon",
+				Email:             "anbraten@sender.forgejo.com",
+				ForgeURL:          "https://forgejo.com/anbraten/test-repo/pulls/1",
+				PullRequestLabels: []string{},
+			},
+		},
+		{
 			name:  "pull-request events should handle a PR closed hook when PR got closed",
 			data:  fixtures.HookPullRequestClosed,
 			event: "pull_request",
@@ -390,32 +428,390 @@ func TestForgejoParser(t *testing.T) {
 				},
 			},
 			pipe: &model.Pipeline{
+				Event: model.EventRelease,
+				Release: &model.Release{
+					Title: "Version 0.0.5",
+				},
 				Author:   "anbraten",
-				Event:    "release",
 				Branch:   "main",
 				Ref:      "refs/tags/0.0.5",
-				Message:  "created release Version 0.0.5",
+				TagTitle: "0.0.5",
 				Sender:   "anbraten",
 				Avatar:   "https://git.xxx/user/avatar/anbraten/-1",
 				Email:    "anbraten@noreply.xxx",
 				ForgeURL: "https://git.xxx/anbraten/demo/releases/tag/0.0.5",
 			},
 		},
+		{
+			name:  "pull-request events should handle a PR assignees added hook when assignees are added",
+			data:  fixtures.HookPullRequestAssigneesAdded,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:            "6543",
+				Event:             "pull_request_metadata",
+				EventReason:       []string{"assigned"},
+				Commit:            "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:            "main",
+				Ref:               "refs/pull/1/head",
+				Refspec:           "6543-patch-1:main",
+				Title:             "Some ned more AAAA",
+				Message:           "Some ned more AAAA",
+				Sender:            "6543",
+				Avatar:            "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:             "6543@noreply.codeberg.org",
+				ForgeURL:          "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels: []string{},
+				ChangedFiles:      nil,
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR milestone added hook when milestone is added",
+			data:  fixtures.HookPullRequestMilestoneAdded,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:               "6543",
+				Event:                "pull_request_metadata",
+				EventReason:          []string{"milestoned"},
+				Commit:               "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:               "main",
+				Ref:                  "refs/pull/1/head",
+				Refspec:              "6543-patch-1:main",
+				Title:                "Some ned more AAAA",
+				Message:              "Some ned more AAAA",
+				Sender:               "6543",
+				Avatar:               "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:                "6543@noreply.codeberg.org",
+				ForgeURL:             "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels:    []string{},
+				PullRequestMilestone: "mile v2",
+				ChangedFiles:         nil,
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR label updated hook when labels are updated",
+			data:  fixtures.HookPullRequestLabelAdded,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:               "6543",
+				Event:                "pull_request_metadata",
+				EventReason:          []string{"label_updated"},
+				Commit:               "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:               "main",
+				Ref:                  "refs/pull/1/head",
+				Refspec:              "6543-patch-1:main",
+				Title:                "Some ned more AAAA",
+				Message:              "Some ned more AAAA",
+				Sender:               "6543",
+				Avatar:               "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:                "6543@noreply.codeberg.org",
+				ForgeURL:             "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels:    []string{"Kind/Documentation", "Kind/Enhancement"},
+				PullRequestMilestone: "mile v2",
+				ChangedFiles:         nil,
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR assignee cleared hook when assignee is removed",
+			data:  fixtures.HookPullRequestAssigneeCleared,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:               "6543",
+				Event:                "pull_request_metadata",
+				EventReason:          []string{"unassigned"},
+				Commit:               "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:               "main",
+				Ref:                  "refs/pull/1/head",
+				Refspec:              "6543-patch-1:main",
+				Title:                "Some ned more AAAA",
+				Message:              "Some ned more AAAA",
+				Sender:               "6543",
+				Avatar:               "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:                "6543@noreply.codeberg.org",
+				ForgeURL:             "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels:    []string{"Kind/Documentation", "Kind/Enhancement"},
+				PullRequestMilestone: "mile v2",
+				ChangedFiles:         nil,
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR milestone changed hook when milestone is changed",
+			data:  fixtures.HookPullRequestMilestoneChanged,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:               "6543",
+				Event:                "pull_request_metadata",
+				EventReason:          []string{"milestoned"},
+				Commit:               "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:               "main",
+				Ref:                  "refs/pull/1/head",
+				Refspec:              "6543-patch-1:main",
+				Title:                "Some ned more AAAA",
+				Message:              "Some ned more AAAA",
+				Sender:               "6543",
+				Avatar:               "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:                "6543@noreply.codeberg.org",
+				ForgeURL:             "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels:    []string{"Kind/Documentation", "Kind/Enhancement"},
+				PullRequestMilestone: "mile v2",
+				ChangedFiles:         nil,
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR labels updated hook when labels are updated",
+			data:  fixtures.HookPullRequestLabelsUpdated,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:               "6543",
+				Event:                "pull_request_metadata",
+				EventReason:          []string{"label_updated"},
+				Commit:               "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:               "main",
+				Ref:                  "refs/pull/1/head",
+				Refspec:              "6543-patch-1:main",
+				Title:                "Some ned more AAAA",
+				Message:              "Some ned more AAAA",
+				Sender:               "6543",
+				Avatar:               "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:                "6543@noreply.codeberg.org",
+				ForgeURL:             "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels:    []string{"Kind/Enhancement", "Kind/Testing"},
+				PullRequestMilestone: "mile v1",
+				ChangedFiles:         nil,
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR labels cleared hook when labels are cleared",
+			data:  fixtures.HookPullRequestLabelsCleared,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:               "6543",
+				Event:                "pull_request_metadata",
+				EventReason:          []string{"label_cleared"},
+				Commit:               "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:               "main",
+				Ref:                  "refs/pull/1/head",
+				Refspec:              "6543-patch-1:main",
+				Title:                "Some ned more AAAA",
+				Message:              "Some ned more AAAA",
+				Sender:               "6543",
+				Avatar:               "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:                "6543@noreply.codeberg.org",
+				ForgeURL:             "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels:    []string{},
+				PullRequestMilestone: "mile v1",
+				ChangedFiles:         nil,
+			},
+		},
+		{
+			name:  "pull-request events should handle a PR milestone cleared hook when milestone is removed",
+			data:  fixtures.HookPullRequestMilestoneCleared,
+			event: "pull_request",
+			repo: &model.Repo{
+				ForgeRemoteID: "138564",
+				Owner:         "test_it",
+				Name:          "test_ci_thing",
+				FullName:      "test_it/test_ci_thing",
+				Avatar:        "https://codeberg.org/avatars/bb6f3159a98a869b43f20b350542f8fb",
+				ForgeURL:      "https://codeberg.org/test_it/test_ci_thing",
+				Clone:         "https://codeberg.org/test_it/test_ci_thing.git",
+				CloneSSH:      "ssh://git@codeberg.org/test_it/test_ci_thing.git",
+				Branch:        "main",
+				PREnabled:     true,
+				Perm: &model.Perm{
+					Pull:  true,
+					Push:  true,
+					Admin: true,
+				},
+			},
+			pipe: &model.Pipeline{
+				Author:            "6543",
+				Event:             "pull_request_metadata",
+				EventReason:       []string{"demilestoned"},
+				Commit:            "36b5813240a9d2daa29b05046d56a53e18f39a3e",
+				Branch:            "main",
+				Ref:               "refs/pull/1/head",
+				Refspec:           "6543-patch-1:main",
+				Title:             "Some ned more AAAA",
+				Message:           "Some ned more AAAA",
+				Sender:            "6543",
+				Avatar:            "https://codeberg.org/avatars/09a234c768cb9bca78f6b2f82d6af173",
+				Email:             "6543@noreply.codeberg.org",
+				ForgeURL:          "https://codeberg.org/test_it/test_ci_thing/pulls/1",
+				PullRequestLabels: []string{},
+				ChangedFiles:      nil,
+			},
+		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			req, _ := http.NewRequest(http.MethodPost, "/api/hook", bytes.NewBufferString(tc.data))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodPost, "/api/hook", bytes.NewBufferString(tt.data))
 			req.Header = http.Header{}
-			req.Header.Set(hookEvent, tc.event)
+			req.Header.Set(hookEvent, tt.event)
 			r, p, err := parseHook(req)
-			if tc.err != nil {
-				assert.ErrorIs(t, err, tc.err)
+			if tt.err != nil {
+				assert.ErrorIs(t, err, tt.err)
 			} else if assert.NoError(t, err) {
-				assert.EqualValues(t, tc.repo, r)
+				assert.EqualValues(t, tt.repo, r)
 				p.Timestamp = 0
-				assert.EqualValues(t, tc.pipe, p)
+				assert.EqualValues(t, tt.pipe, p)
 			}
+		})
+	}
+}
+
+func TestParseIncompleteHookPayloads(t *testing.T) {
+	incomplete := []string{
+		`{}`,
+		`{"repository": {}}`,
+		`{"repository": {"full_name": "noslash"}, "sender": {}}`,
+	}
+	for _, payload := range incomplete {
+		t.Run(payload, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				_, _, err := parsePushHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parseCreatedHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parsePullRequestHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parseReleaseHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+			})
+		})
+	}
+
+	incompletePullRequest := []string{
+		`{"repository": {"full_name": "a/b", "owner": {}}, "sender": {}, "action": "opened", "pull_request": {}}`,
+		`{"repository": {"full_name": "a/b", "owner": {}}, "sender": {}, "action": "opened", "pull_request": {"user": {}}}`,
+	}
+	for _, payload := range incompletePullRequest {
+		t.Run(payload, func(t *testing.T) {
+			assert.NotPanics(t, func() {
+				_, _, err := parsePullRequestHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+				_, _, err = parseReleaseHook(bytes.NewBufferString(payload))
+				assert.Error(t, err)
+			})
 		})
 	}
 }

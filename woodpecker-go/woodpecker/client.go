@@ -23,15 +23,17 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"go.woodpecker-ci.org/woodpecker/v3/woodpecker-go/woodpecker/httputil"
 )
 
 const (
 	pathLogLevel = "%s/api/log-level"
+	pathVersion  = "%s/api/version"
 
 	//nolint:godot
 	// TODO: implement endpoints
 	// pathFeed           = "%s/api/user/feed"
-	// pathVersion        = "%s/version"
 )
 
 type ClientError struct {
@@ -50,12 +52,14 @@ type client struct {
 
 // New returns a client at the specified url.
 func New(uri string) Client {
-	return &client{http.DefaultClient, strings.TrimSuffix(uri, "/")}
+	wrappedClient := httputil.WrapClient(http.DefaultClient, "go-client")
+	return &client{wrappedClient, strings.TrimSuffix(uri, "/")}
 }
 
 // NewClient returns a client at the specified url.
 func NewClient(uri string, cli *http.Client) Client {
-	return &client{cli, strings.TrimSuffix(uri, "/")}
+	wrappedClient := httputil.WrapClient(cli, "go-client")
+	return &client{wrappedClient, strings.TrimSuffix(uri, "/")}
 }
 
 // SetClient sets the http.Client.
@@ -66,6 +70,14 @@ func (c *client) SetClient(client *http.Client) {
 // SetAddress sets the server address.
 func (c *client) SetAddress(addr string) {
 	c.addr = addr
+}
+
+// Version returns the version of the server.
+func (c *client) Version() (*Version, error) {
+	out := new(Version)
+	uri := fmt.Sprintf(pathVersion, c.addr)
+	err := c.get(uri, out)
+	return out, err
 }
 
 // LogLevel returns the current logging level.

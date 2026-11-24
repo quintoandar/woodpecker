@@ -35,16 +35,17 @@ func (s storage) GetPipelineNumber(repo *model.Repo, num int64) (*model.Pipeline
 	).Get(pipeline))
 }
 
-func (s storage) GetPipelineBadge(repo *model.Repo, branch string) (*model.Pipeline, error) {
+func (s storage) GetPipelineBadge(repo *model.Repo, branch string, events []model.WebhookEvent) (*model.Pipeline, error) {
 	pipeline := new(model.Pipeline)
 	return pipeline, wrapGet(s.engine.
 		Desc("number").
-		Where(builder.Eq{"repo_id": repo.ID, "branch": branch, "event": model.EventPush}).
+		Where(builder.Eq{"repo_id": repo.ID, "branch": branch}).
+		Where(builder.In("event", events)).
 		Where(builder.Neq{"status": model.StatusBlocked}).
 		Get(pipeline))
 }
 
-func (s storage) GetPipelineLast(repo *model.Repo, branch string) (*model.Pipeline, error) {
+func (s storage) GetPipelineLastByBranch(repo *model.Repo, branch string) (*model.Pipeline, error) {
 	pipeline := new(model.Pipeline)
 	return pipeline, wrapGet(s.engine.
 		Desc("number").
@@ -52,16 +53,18 @@ func (s storage) GetPipelineLast(repo *model.Repo, branch string) (*model.Pipeli
 		Get(pipeline))
 }
 
+// GetPipelineLastBefore returns the pipeline of a branch that precedes the
+// given pipeline number.
 func (s storage) GetPipelineLastBefore(repo *model.Repo, branch string, num int64) (*model.Pipeline, error) {
 	pipeline := new(model.Pipeline)
 	return pipeline, wrapGet(s.engine.
 		Desc("number").
-		Where(builder.Lt{"id": num}.
+		Where(builder.Lt{"number": num}.
 			And(builder.Eq{"repo_id": repo.ID, "branch": branch})).
 		Get(pipeline))
 }
 
-func (s storage) GetPipelineList(repo *model.Repo, p *model.ListOptions, f *model.PipelineFilter) ([]*model.Pipeline, error) {
+func (s storage) GetPipelineList(repo *model.Repo, p *model.ListOptionsWithAll, f *model.PipelineFilter) ([]*model.Pipeline, error) {
 	pipelines := make([]*model.Pipeline, 0, 16)
 
 	cond := builder.NewCond().And(builder.Eq{"repo_id": repo.ID})
@@ -101,16 +104,32 @@ func (s storage) GetPipelineList(repo *model.Repo, p *model.ListOptions, f *mode
 func (s storage) GetRepoLatestPipelines(repoIDs []int64) ([]*model.Pipeline, error) {
 	pipelines := make([]*model.Pipeline, 0, len(repoIDs))
 
-	pipelineIDs := make([]int64, 0, len(repoIDs))
-	if err := s.engine.Select("MAX(id) AS id").
+	// The latest pipeline of a repo is the one holding the highest number,
+	// which is assigned per repo in the order pipelines are created.
+	type repoLatest struct {
+		RepoID int64 `xorm:"repo_id"`
+		Number int64 `xorm:"number"`
+	}
+
+	latest := make([]*repoLatest, 0, len(repoIDs))
+	if err := s.engine.Select("repo_id, MAX(number) AS number").
 		Table("pipelines").
 		Where(builder.In("repo_id", repoIDs)).
 		GroupBy("repo_id").
-		Find(&pipelineIDs); err != nil {
+		Find(&latest); err != nil {
 		return nil, err
 	}
 
-	return pipelines, s.engine.Where(builder.In("id", pipelineIDs)).Find(&pipelines)
+	if len(latest) == 0 {
+		return pipelines, nil
+	}
+
+	cond := builder.NewCond()
+	for _, l := range latest {
+		cond = cond.Or(builder.Eq{"repo_id": l.RepoID, "number": l.Number})
+	}
+
+	return pipelines, s.engine.Where(cond).Find(&pipelines)
 }
 
 // GetActivePipelineList get all pipelines that are pending, running or blocked.
@@ -127,56 +146,62 @@ func (s storage) GetPipelineCount() (int64, error) {
 	return s.engine.Count(new(model.Pipeline))
 }
 
+// CreatePipeline creates a new pipeline with retry logic for unique constraint errors.
 func (s storage) CreatePipeline(pipeline *model.Pipeline, stepList ...*model.Step) error {
-	sess := s.engine.NewSession()
-	defer sess.Close()
-	if err := sess.Begin(); err != nil {
-		return err
-	}
+	return retryWrite(func() error {
+		sess := s.engine.NewSession()
+		defer sess.Close()
+		if err := sess.Begin(); err != nil {
+			return wrapUpdate(0, err)
+		}
 
-	repoExist, err := sess.Where("id = ?", pipeline.RepoID).Exist(&model.Repo{})
-	if err != nil {
-		return err
-	}
+		repoExist, err := sess.Where("id = ?", pipeline.RepoID).Exist(&model.Repo{})
+		if err != nil {
+			return wrapUpdate(0, err)
+		}
 
-	if !repoExist {
-		return ErrorRepoNotExist{RepoID: pipeline.RepoID}
-	}
+		if !repoExist {
+			return ErrorRepoNotExist{RepoID: pipeline.RepoID}
+		}
 
-	// calc pipeline number
-	var number int64
-	if _, err := sess.Select("MAX(number)").
-		Table(new(model.Pipeline)).
-		Where("repo_id = ?", pipeline.RepoID).
-		Get(&number); err != nil {
-		return err
-	}
-	pipeline.Number = number + 1
+		// calc pipeline number
+		var number int64
+		if _, err := sess.Select("MAX(number)").
+			Table(new(model.Pipeline)).
+			Where("repo_id = ?", pipeline.RepoID).
+			Get(&number); err != nil {
+			return wrapUpdate(0, err)
+		}
+		pipeline.Number = number + 1
 
-	pipeline.Created = time.Now().UTC().Unix()
-	// only Insert set auto created ID back to object
-	if _, err := sess.Insert(pipeline); err != nil {
-		return err
-	}
-
-	for i := range stepList {
-		stepList[i].PipelineID = pipeline.ID
+		pipeline.Created = time.Now().UTC().Unix()
 		// only Insert set auto created ID back to object
-		if _, err := sess.Insert(stepList[i]); err != nil {
+		if err := wrapInsert(sess.Insert(pipeline)); err != nil {
 			return err
 		}
-	}
 
-	return sess.Commit()
+		for i := range stepList {
+			stepList[i].PipelineID = pipeline.ID
+			// only Insert set auto created ID back to object
+			if err := wrapInsert(sess.Insert(stepList[i])); err != nil {
+				return err
+			}
+		}
+
+		return wrapUpdate(0, sess.Commit())
+	})
 }
 
 func (s storage) UpdatePipeline(pipeline *model.Pipeline) error {
-	_, err := s.engine.ID(pipeline.ID).AllCols().Update(pipeline)
-	return err
+	return retryWrite(func() error {
+		return wrapUpdate(s.engine.ID(pipeline.ID).AllCols().Update(pipeline))
+	})
 }
 
 func (s storage) DeletePipeline(pipeline *model.Pipeline) error {
-	return s.deletePipeline(s.engine.NewSession(), pipeline.ID)
+	return retryWrite(func() error {
+		return s.deletePipeline(s.engine.NewSession(), pipeline.ID)
+	})
 }
 
 func (s storage) deletePipeline(sess *xorm.Session, pipelineID int64) error {

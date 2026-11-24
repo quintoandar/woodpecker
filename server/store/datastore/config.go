@@ -48,25 +48,30 @@ func (s storage) configFindIdentical(sess *xorm.Session, repoID int64, hash, nam
 func (s storage) ConfigPersist(conf *model.Config) (*model.Config, error) {
 	conf.Hash = fmt.Sprintf("%x", sha256.Sum256(conf.Data))
 
+	// no transaction: it would not stop a concurrent insert anyway, and on postgres a
+	// failed insert aborts the transaction, which would break the lookup below
 	sess := s.engine.NewSession()
 	defer sess.Close()
-	if err := sess.Begin(); err != nil {
-		return nil, err
-	}
 
 	existingConfig, err := s.configFindIdentical(sess, conf.RepoID, conf.Hash, conf.Name)
-	if err != nil && !errors.Is(err, types.RecordNotExist) {
+	if err != nil && !errors.Is(err, types.ErrRecordNotExist) {
 		return nil, err
 	}
 	if existingConfig != nil {
 		return existingConfig, nil
 	}
 
-	if err := s.configCreate(sess, conf); err != nil {
+	err = s.configCreate(sess, conf)
+	if errors.Is(err, types.ErrInsertDuplicateDetected) {
+		// a concurrent request persisted the identical config after our lookup,
+		// so use that one (see https://github.com/woodpecker-ci/woodpecker/issues/7173)
+		return s.configFindIdentical(sess, conf.RepoID, conf.Hash, conf.Name)
+	}
+	if err != nil {
 		return nil, err
 	}
 
-	return conf, sess.Commit()
+	return conf, nil
 }
 
 func (s storage) configCreate(sess *xorm.Session, config *model.Config) error {
@@ -79,12 +84,10 @@ func (s storage) configCreate(sess *xorm.Session, config *model.Config) error {
 	}
 
 	// only Insert set auto created ID back to object
-	_, err := sess.Insert(config)
-	return err
+	return wrapInsert(sess.Insert(config))
 }
 
 func (s storage) PipelineConfigCreate(config *model.PipelineConfig) error {
 	// only Insert set auto created ID back to object
-	_, err := s.engine.Insert(config)
-	return err
+	return wrapInsert(s.engine.Insert(config))
 }

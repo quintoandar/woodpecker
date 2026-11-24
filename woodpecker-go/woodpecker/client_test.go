@@ -23,16 +23,15 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func Test_LogLevel(t *testing.T) {
+func TestLogLevel(t *testing.T) {
 	logLevel := "warn"
 	fixtureHandler := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			var ll LogLevel
-			if !assert.NoError(t, json.NewDecoder(r.Body).Decode(&ll)) {
-				return
-			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&ll))
 			logLevel = ll.Level
 		}
 
@@ -54,4 +53,24 @@ func Test_LogLevel(t *testing.T) {
 	newLvl, err := client.SetLogLevel(&LogLevel{Level: "trace"})
 	assert.NoError(t, err)
 	assert.True(t, strings.EqualFold(newLvl.Level, logLevel))
+}
+
+func TestVersion(t *testing.T) {
+	fixtureHandler := func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/api/version", r.URL.Path)
+		_, err := fmt.Fprint(w, `{"source":"https://github.com/woodpecker-ci/woodpecker","version":"3.15.0"}`)
+		assert.NoError(t, err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(fixtureHandler))
+	defer ts.Close()
+
+	client := NewClient(ts.URL, http.DefaultClient)
+
+	version, err := client.Version()
+	require.NoError(t, err)
+	assert.Equal(t, &Version{
+		Source:  "https://github.com/woodpecker-ci/woodpecker",
+		Version: "3.15.0",
+	}, version)
 }

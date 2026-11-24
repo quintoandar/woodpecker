@@ -77,18 +77,21 @@ func (c *Compiler) createProcess(container *yaml_types.Container, workflow *yaml
 		extraHosts[i].IP = ip
 	}
 
-	var volumes []string
-	if !c.local {
-		volumes = append(volumes, workspaceVolume)
-	}
+	// always mount the workspace volume: it references config.Volume, which the
+	// backend provisions, so steps mount the volume the backend actually creates
+	volumes := []string{workspaceVolume}
 	volumes = append(volumes, c.volumes...)
 	for _, volume := range container.Volumes.Volumes {
 		volumes = append(volumes, volume.String())
 	}
 
 	// append default environment variables
-	environment := map[string]string{}
+	environment := make(map[string]string)
 	maps.Copy(environment, c.env)
+
+	if !container.IsPlugin() {
+		maps.Copy(environment, c.nonPluginEnv)
+	}
 
 	environment["CI_WORKSPACE"] = path.Join(workspaceBase, c.workspacePath)
 
@@ -114,7 +117,7 @@ func (c *Compiler) createProcess(container *yaml_types.Container, workflow *yaml
 		return secret.Value, nil
 	}
 
-	secretMapping := map[string]string{}
+	secretMapping := make(map[string]string)
 
 	if err := settings.ParamsToEnv(container.Settings, environment, "PLUGIN_", true, getSecretValue, secretMapping); err != nil {
 		return nil, err
@@ -146,14 +149,23 @@ func (c *Compiler) createProcess(container *yaml_types.Container, workflow *yaml
 		ports = append(ports, port)
 	}
 
+	whenEnv := make(map[string]string)
+	maps.Copy(whenEnv, c.env)
+	maps.Copy(whenEnv, c.nonPluginEnv)
+
 	// at least one constraint contain status success, or all constraints have no status set
-	onSuccess := container.When.IncludesStatusSuccess()
+	onSuccess := container.When.IncludesStatusSuccess(c.metadata, false, whenEnv)
 	// at least one constraint must include the status failure.
-	onFailure := container.When.IncludesStatusFailure()
+	onFailure := container.When.IncludesStatusFailure(c.metadata, false, whenEnv)
 
 	failure := container.Failure
 	if container.Failure == "" {
-		failure = metadata.FailureFail
+		failure = string(metadata.FailureFail)
+	}
+
+	// TODO: remove with version 4.x
+	if c.forceIgnoreServiceFailure && detached {
+		failure = string(metadata.FailureIgnore)
 	}
 
 	return &backend_types.Step{

@@ -6,7 +6,7 @@
         :model-value="item.key"
         :placeholder="keyPlaceholder"
         :class="{
-          'bg-red-100 dark:bg-red-900':
+          'bg-red-100 dark:bg-red-900!':
             isDuplicateKey(item.key, index) || (item.key === '' && index !== displayItems.length - 1),
         }"
         @update:model-value="updateItem(index, 'key', $event)"
@@ -56,7 +56,7 @@ const emit = defineEmits<{
 const items = ref(Object.entries(props.modelValue).map(([key, value]) => ({ key, value })));
 
 const displayItems = computed(() => {
-  if (items.value.length === 0 || items.value[items.value.length - 1].key !== '') {
+  if (items.value.length === 0 || items.value.at(-1)?.key !== '') {
     return [...items.value, { key: '', value: '' }];
   }
   return items.value;

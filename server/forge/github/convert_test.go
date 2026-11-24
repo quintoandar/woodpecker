@@ -18,46 +18,67 @@ package github
 import (
 	"testing"
 
-	"github.com/google/go-github/v74/github"
+	"github.com/google/go-github/v93/github"
 	"github.com/stretchr/testify/assert"
 
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 )
 
-func Test_convertStatus(t *testing.T) {
-	assert.Equal(t, statusSuccess, convertStatus(model.StatusSuccess))
-	assert.Equal(t, statusPending, convertStatus(model.StatusPending))
-	assert.Equal(t, statusPending, convertStatus(model.StatusRunning))
-	assert.Equal(t, statusFailure, convertStatus(model.StatusFailure))
-	assert.Equal(t, statusError, convertStatus(model.StatusKilled))
-	assert.Equal(t, statusError, convertStatus(model.StatusError))
+func TestConvertStatus(t *testing.T) {
+	tests := []struct {
+		name   string
+		status model.StatusValue
+		want   string
+	}{
+		{name: "success", status: model.StatusSuccess, want: statusSuccess},
+		{name: "failure", status: model.StatusFailure, want: statusFailure},
+		{name: "declined", status: model.StatusDeclined, want: statusFailure},
+		{name: "killed", status: model.StatusKilled, want: statusError},
+		{name: "error", status: model.StatusError, want: statusError},
+		{name: "pending", status: model.StatusPending, want: statusPending},
+		{name: "running", status: model.StatusRunning, want: statusPending},
+		{name: "blocked", status: model.StatusBlocked, want: statusPending},
+		{name: "skipped", status: model.StatusSkipped, want: statusPending},
+		{name: "canceled", status: model.StatusCanceled, want: statusPending},
+		// StatusCreated is internal-only and never terminal.
+		{name: "created", status: model.StatusCreated, want: statusPending},
+		{name: "out of enum", status: model.StatusValue("bogus"), want: statusError},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, convertStatus(tt.status))
+		})
+	}
 }
 
-func Test_convertDesc(t *testing.T) {
+func TestConvertDesc(t *testing.T) {
 	assert.Equal(t, descSuccess, convertDesc(model.StatusSuccess))
 	assert.Equal(t, descPending, convertDesc(model.StatusPending))
 	assert.Equal(t, descPending, convertDesc(model.StatusRunning))
 	assert.Equal(t, descFailure, convertDesc(model.StatusFailure))
+	assert.Equal(t, descBlocked, convertDesc(model.StatusBlocked))
+	assert.Equal(t, descDeclined, convertDesc(model.StatusDeclined))
 	assert.Equal(t, descError, convertDesc(model.StatusKilled))
 	assert.Equal(t, descError, convertDesc(model.StatusError))
 }
 
-func Test_convertRepoList(t *testing.T) {
+func TestConvertRepoList(t *testing.T) {
 	from := []*github.Repository{
 		{
-			Private:  github.Ptr(false),
-			FullName: github.Ptr("octocat/hello-world"),
-			Name:     github.Ptr("hello-world"),
+			Private:  new(false),
+			FullName: new("octocat/hello-world"),
+			Name:     new("hello-world"),
 			Owner: &github.User{
-				AvatarURL: github.Ptr("http://..."),
-				Login:     github.Ptr("octocat"),
+				AvatarURL: new("http://..."),
+				Login:     new("octocat"),
 			},
-			HTMLURL:  github.Ptr("https://github.com/octocat/hello-world"),
-			CloneURL: github.Ptr("https://github.com/octocat/hello-world.git"),
-			Permissions: map[string]bool{
-				"push":  true,
-				"pull":  true,
-				"admin": true,
+			HTMLURL:  new("https://github.com/octocat/hello-world"),
+			CloneURL: new("https://github.com/octocat/hello-world.git"),
+			Permissions: &github.RepositoryPermissions{
+				Admin: new(true),
+				Push:  new(true),
+				Pull:  new(true),
 			},
 		},
 	}
@@ -69,22 +90,22 @@ func Test_convertRepoList(t *testing.T) {
 	assert.Equal(t, "hello-world", to[0].Name)
 }
 
-func Test_convertRepo(t *testing.T) {
+func TestConvertRepo(t *testing.T) {
 	from := github.Repository{
-		FullName:      github.Ptr("octocat/hello-world"),
-		Name:          github.Ptr("hello-world"),
-		HTMLURL:       github.Ptr("https://github.com/octocat/hello-world"),
-		CloneURL:      github.Ptr("https://github.com/octocat/hello-world.git"),
-		DefaultBranch: github.Ptr("develop"),
-		Private:       github.Ptr(true),
+		FullName:      new("octocat/hello-world"),
+		Name:          new("hello-world"),
+		HTMLURL:       new("https://github.com/octocat/hello-world"),
+		CloneURL:      new("https://github.com/octocat/hello-world.git"),
+		DefaultBranch: new("develop"),
+		Private:       new(true),
 		Owner: &github.User{
-			AvatarURL: github.Ptr("http://..."),
-			Login:     github.Ptr("octocat"),
+			AvatarURL: new("http://..."),
+			Login:     new("octocat"),
 		},
-		Permissions: map[string]bool{
-			"push":  true,
-			"pull":  true,
-			"admin": true,
+		Permissions: &github.RepositoryPermissions{
+			Admin: new(true),
+			Push:  new(true),
+			Pull:  new(true),
 		},
 	}
 
@@ -99,12 +120,12 @@ func Test_convertRepo(t *testing.T) {
 	assert.Equal(t, "https://github.com/octocat/hello-world", to.ForgeURL)
 }
 
-func Test_convertPerm(t *testing.T) {
+func TestConvertPerm(t *testing.T) {
 	from := &github.Repository{
-		Permissions: map[string]bool{
-			"admin": true,
-			"push":  true,
-			"pull":  true,
+		Permissions: &github.RepositoryPermissions{
+			Admin: new(true),
+			Push:  new(true),
+			Pull:  new(true),
 		},
 	}
 
@@ -114,21 +135,21 @@ func Test_convertPerm(t *testing.T) {
 	assert.True(t, to.Admin)
 }
 
-func Test_convertTeam(t *testing.T) {
+func TestConvertTeam(t *testing.T) {
 	from := &github.Organization{
-		Login:     github.Ptr("octocat"),
-		AvatarURL: github.Ptr("http://..."),
+		Login:     new("octocat"),
+		AvatarURL: new("http://..."),
 	}
 	to := convertTeam(from)
 	assert.Equal(t, "octocat", to.Login)
 	assert.Equal(t, "http://...", to.Avatar)
 }
 
-func Test_convertTeamList(t *testing.T) {
+func TestConvertTeamList(t *testing.T) {
 	from := []*github.Organization{
 		{
-			Login:     github.Ptr("octocat"),
-			AvatarURL: github.Ptr("http://..."),
+			Login:     new("octocat"),
+			AvatarURL: new("http://..."),
 		},
 	}
 	to := convertTeamList(from)
@@ -136,17 +157,17 @@ func Test_convertTeamList(t *testing.T) {
 	assert.Equal(t, "http://...", to[0].Avatar)
 }
 
-func Test_convertRepoHook(t *testing.T) {
+func TestConvertRepoHook(t *testing.T) {
 	t.Run("should convert a repository from webhook", func(t *testing.T) {
 		from := &github.PushEventRepository{Owner: &github.User{}}
-		from.Owner.Login = github.Ptr("octocat")
-		from.Owner.Name = github.Ptr("octocat")
-		from.Name = github.Ptr("hello-world")
-		from.FullName = github.Ptr("octocat/hello-world")
-		from.Private = github.Ptr(true)
-		from.HTMLURL = github.Ptr("https://github.com/octocat/hello-world")
-		from.CloneURL = github.Ptr("https://github.com/octocat/hello-world.git")
-		from.DefaultBranch = github.Ptr("develop")
+		from.Owner.Login = new("octocat")
+		from.Owner.Name = new("octocat")
+		from.Name = new("hello-world")
+		from.FullName = new("octocat/hello-world")
+		from.Private = new(true)
+		from.HTMLURL = new("https://github.com/octocat/hello-world")
+		from.CloneURL = new("https://github.com/octocat/hello-world.git")
+		from.DefaultBranch = new("develop")
 
 		repo := convertRepoHook(from)
 		assert.Equal(t, *from.Owner.Login, repo.Owner)
@@ -157,122 +178,14 @@ func Test_convertRepoHook(t *testing.T) {
 		assert.Equal(t, *from.CloneURL, repo.Clone)
 		assert.Equal(t, *from.DefaultBranch, repo.Branch)
 	})
-}
 
-func Test_parsePullHook(t *testing.T) {
-	from := &github.PullRequestEvent{
-		Action: github.Ptr(actionOpen),
-		PullRequest: &github.PullRequest{
-			State:   github.Ptr(stateOpen),
-			HTMLURL: github.Ptr("https://github.com/octocat/hello-world/pulls/42"),
-			Number:  github.Ptr(42),
-			Title:   github.Ptr("Updated README.md"),
-			Base: &github.PullRequestBranch{
-				Ref: github.Ptr("main"),
-			},
-			Head: &github.PullRequestBranch{
-				Ref: github.Ptr("changes"),
-				SHA: github.Ptr("f72fc19"),
-				Repo: &github.Repository{
-					CloneURL: github.Ptr("https://github.com/octocat/hello-world-fork"),
-				},
-			},
-			User: &github.User{
-				Login:     github.Ptr("octocat"),
-				AvatarURL: github.Ptr("https://avatars1.githubusercontent.com/u/583231"),
-			},
-		}, Sender: &github.User{
-			Login: github.Ptr("octocat"),
-		},
-	}
-	pull, _, pipeline, err := parsePullHook(from, true)
-	assert.NoError(t, err)
-	assert.NotNil(t, pull)
-	assert.Equal(t, model.EventPull, pipeline.Event)
-	assert.Equal(t, *from.PullRequest.Base.Ref, pipeline.Branch)
-	assert.Equal(t, "refs/pull/42/merge", pipeline.Ref)
-	assert.Equal(t, "changes:main", pipeline.Refspec)
-	assert.Equal(t, *from.PullRequest.Head.SHA, pipeline.Commit)
-	assert.Equal(t, *from.PullRequest.Title, pipeline.Message)
-	assert.Equal(t, *from.PullRequest.Title, pipeline.Title)
-	assert.Equal(t, *from.PullRequest.User.Login, pipeline.Author)
-	assert.Equal(t, *from.PullRequest.User.AvatarURL, pipeline.Avatar)
-	assert.Equal(t, *from.Sender.Login, pipeline.Sender)
-}
+	t.Run("should derive full name from owner and name when missing", func(t *testing.T) {
+		from := &github.PushEventRepository{Owner: &github.User{}}
+		from.Owner.Login = new("octocat")
+		from.Name = new("hello-world")
+		// FullName intentionally left empty to hit the fallback branch
 
-func Test_parseDeployHook(t *testing.T) {
-	from := &github.DeploymentEvent{Deployment: &github.Deployment{}, Sender: &github.User{}}
-	from.Deployment.Description = github.Ptr(":shipit:")
-	from.Deployment.Environment = github.Ptr("production")
-	from.Deployment.Task = github.Ptr("deploy")
-	from.Deployment.ID = github.Ptr(int64(42))
-	from.Deployment.Ref = github.Ptr("main")
-	from.Deployment.SHA = github.Ptr("f72fc19")
-	from.Deployment.URL = github.Ptr("https://github.com/octocat/hello-world")
-	from.Sender.Login = github.Ptr("octocat")
-	from.Sender.AvatarURL = github.Ptr("https://avatars1.githubusercontent.com/u/583231")
-
-	_, pipeline := parseDeployHook(from)
-	assert.Equal(t, model.EventDeploy, pipeline.Event)
-	assert.Equal(t, "main", pipeline.Branch)
-	assert.Equal(t, "refs/heads/main", pipeline.Ref)
-	assert.Equal(t, *from.Deployment.SHA, pipeline.Commit)
-	assert.Equal(t, *from.Deployment.Description, pipeline.Message)
-	assert.Equal(t, *from.Deployment.URL, pipeline.ForgeURL)
-	assert.Equal(t, *from.Sender.Login, pipeline.Author)
-	assert.Equal(t, *from.Sender.AvatarURL, pipeline.Avatar)
-}
-
-func Test_parsePushHook(t *testing.T) {
-	t.Run("convert push from webhook", func(t *testing.T) {
-		from := &github.PushEvent{Sender: &github.User{}, Repo: &github.PushEventRepository{}, HeadCommit: &github.HeadCommit{Author: &github.CommitAuthor{}}}
-		from.Sender.Login = github.Ptr("octocat")
-		from.Sender.AvatarURL = github.Ptr("https://avatars1.githubusercontent.com/u/583231")
-		from.Repo.CloneURL = github.Ptr("https://github.com/octocat/hello-world.git")
-		from.HeadCommit.Author.Email = github.Ptr("github.Ptr(octocat@github.com")
-		from.HeadCommit.Message = github.Ptr("updated README.md")
-		from.HeadCommit.URL = github.Ptr("https://github.com/octocat/hello-world")
-		from.HeadCommit.ID = github.Ptr("f72fc19")
-		from.Ref = github.Ptr("refs/heads/main")
-
-		_, pipeline := parsePushHook(from)
-		assert.Equal(t, model.EventPush, pipeline.Event)
-		assert.Equal(t, "main", pipeline.Branch)
-		assert.Equal(t, "refs/heads/main", pipeline.Ref)
-		assert.Equal(t, *from.HeadCommit.ID, pipeline.Commit)
-		assert.Equal(t, *from.HeadCommit.Message, pipeline.Message)
-		assert.Equal(t, *from.HeadCommit.URL, pipeline.ForgeURL)
-		assert.Equal(t, *from.Sender.Login, pipeline.Author)
-		assert.Equal(t, *from.Sender.AvatarURL, pipeline.Avatar)
-		assert.Equal(t, *from.HeadCommit.Author.Email, pipeline.Email)
-	})
-
-	t.Run("convert tag from webhook", func(t *testing.T) {
-		from := &github.PushEvent{}
-		from.Ref = github.Ptr("refs/tags/v1.0.0")
-
-		_, pipeline := parsePushHook(from)
-		assert.Equal(t, model.EventTag, pipeline.Event)
-		assert.Equal(t, "refs/tags/v1.0.0", pipeline.Ref)
-	})
-
-	t.Run("convert tag's base branch to pipeline's branch ", func(t *testing.T) {
-		from := &github.PushEvent{}
-		from.Ref = github.Ptr("refs/tags/v1.0.0")
-		from.BaseRef = github.Ptr("refs/heads/main")
-
-		_, pipeline := parsePushHook(from)
-		assert.Equal(t, model.EventTag, pipeline.Event)
-		assert.Equal(t, "main", pipeline.Branch)
-	})
-
-	t.Run("not convert tag's base_ref from webhook if not prefixed with 'ref/heads/'", func(t *testing.T) {
-		from := &github.PushEvent{}
-		from.Ref = github.Ptr("refs/tags/v1.0.0")
-		from.BaseRef = github.Ptr("refs/refs/main")
-
-		_, pipeline := parsePushHook(from)
-		assert.Equal(t, model.EventTag, pipeline.Event)
-		assert.Equal(t, "refs/tags/v1.0.0", pipeline.Branch)
+		repo := convertRepoHook(from)
+		assert.Equal(t, "octocat/hello-world", repo.FullName)
 	})
 }

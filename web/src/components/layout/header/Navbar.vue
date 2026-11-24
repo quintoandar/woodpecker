@@ -1,6 +1,6 @@
 <template>
   <nav
-    class="text-neutral-content border-wp-background-400 dark:border-wp-background-100 bg-wp-primary-200 text-wp-primary-text-100 dark:bg-wp-primary-300 flex border-b p-4 font-bold"
+    class="text-neutral-content bg-wp-primary-200 text-wp-primary-text-100 dark:bg-wp-primary-300 flex border-b border-black/20 p-4 font-bold"
   >
     <div class="flex items-center space-x-2">
       <router-link :to="{ name: 'home' }" class="-my-2 flex flex-col px-2">
@@ -36,8 +36,9 @@
       <Button
         v-else
         :text="$t('login')"
-        :to="`/login?url=${route.fullPath}`"
+        :to="{ name: 'login' }"
         class="navbar-link !text-wp-primary-text-100 bg-wp-primary-200 dark:bg-wp-primary-300 !border-transparent"
+        @click="saveRedirect"
       />
     </div>
   </nav>
@@ -52,25 +53,31 @@ import Icon from '~/components/atomic/Icon.vue';
 import IconButton from '~/components/atomic/IconButton.vue';
 import useAuthentication from '~/compositions/useAuthentication';
 import useConfig from '~/compositions/useConfig';
+import useUserConfig from '~/compositions/useUserConfig';
 import { useVersion } from '~/compositions/useVersion';
 
 import ActivePipelines from './ActivePipelines.vue';
 
 const version = useVersion();
 const config = useConfig();
+const userConfig = useUserConfig();
 const route = useRoute();
 const authentication = useAuthentication();
 const { user } = authentication;
 const apiUrl = `${config.rootPath ?? ''}/swagger/index.html`;
 
 const { enableSwagger } = config;
+
+function saveRedirect() {
+  userConfig.setUserConfig('redirectUrl', route.fullPath);
+}
 </script>
 
 <style scoped>
 @reference '~/tailwind.css';
 
 .navbar-icon {
-  @apply h-11 w-11 rounded-md p-2.5 hover:bg-black/20 dark:hover:bg-white/5;
+  @apply h-11 w-11 rounded-md p-2.5 hover:bg-black/20! dark:hover:bg-white/10!;
 }
 
 .navbar-icon :deep(svg) {
@@ -78,6 +85,6 @@ const { enableSwagger } = config;
 }
 
 .navbar-link {
-  @apply -my-1 rounded-md px-3 py-2 hover:bg-black/20 dark:hover:bg-white/5;
+  @apply -my-1 rounded-md px-3 py-2 hover:bg-black/20! dark:hover:bg-white/10!;
 }
 </style>

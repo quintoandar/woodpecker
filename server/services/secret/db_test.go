@@ -22,7 +22,8 @@ import (
 
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 	"go.woodpecker-ci.org/woodpecker/v3/server/services/secret"
-	mocks_store "go.woodpecker-ci.org/woodpecker/v3/server/store/mocks"
+	store_mocks "go.woodpecker-ci.org/woodpecker/v3/server/store/mocks"
+	"go.woodpecker-ci.org/woodpecker/v3/server/store/types"
 )
 
 var (
@@ -52,7 +53,7 @@ var (
 )
 
 func TestSecretListPipeline(t *testing.T) {
-	mockStore := mocks_store.NewStore(t)
+	mockStore := store_mocks.NewMockStore(t)
 
 	mockStore.On("SecretList", mock.Anything, mock.Anything, mock.Anything).Once().Return([]*model.Secret{
 		globalSecret,
@@ -60,7 +61,7 @@ func TestSecretListPipeline(t *testing.T) {
 		repoSecret,
 	}, nil)
 
-	s, err := secret.NewDB(mockStore).SecretListPipeline(&model.Repo{}, &model.Pipeline{})
+	s, err := secret.NewDB(mockStore).SecretListPipeline(t.Context(), &model.Repo{}, &model.Pipeline{}, nil)
 	assert.NoError(t, err)
 
 	assert.Len(t, s, 1)
@@ -71,7 +72,7 @@ func TestSecretListPipeline(t *testing.T) {
 		orgSecret,
 	}, nil)
 
-	s, err = secret.NewDB(mockStore).SecretListPipeline(&model.Repo{}, &model.Pipeline{})
+	s, err = secret.NewDB(mockStore).SecretListPipeline(t.Context(), &model.Repo{}, &model.Pipeline{}, nil)
 	assert.NoError(t, err)
 
 	assert.Len(t, s, 1)
@@ -81,9 +82,64 @@ func TestSecretListPipeline(t *testing.T) {
 		globalSecret,
 	}, nil)
 
-	s, err = secret.NewDB(mockStore).SecretListPipeline(&model.Repo{}, &model.Pipeline{})
+	s, err = secret.NewDB(mockStore).SecretListPipeline(t.Context(), &model.Repo{}, &model.Pipeline{}, nil)
 	assert.NoError(t, err)
 
 	assert.Len(t, s, 1)
 	assert.Equal(t, "value-global", s[0].Value)
+}
+
+// Deleting looks the secret up in its scope first, so only a secret of that
+// repo, org or the global scope can be deleted.
+func TestSecretDelete(t *testing.T) {
+	repo := &model.Repo{ID: 1}
+
+	t.Run("repo", func(t *testing.T) {
+		s := store_mocks.NewMockStore(t)
+		s.On("SecretFind", repo, "secret").Return(repoSecret, nil)
+		s.On("SecretDelete", repoSecret).Return(nil)
+		s.On("SecretFind", repo, "missing").Return(nil, types.ErrRecordNotExist)
+
+		db := secret.NewDB(s)
+		assert.NoError(t, db.SecretDelete(repo, "secret"))
+		assert.ErrorIs(t, db.SecretDelete(repo, "missing"), types.ErrRecordNotExist)
+	})
+
+	t.Run("org", func(t *testing.T) {
+		s := store_mocks.NewMockStore(t)
+		s.On("OrgSecretFind", int64(1), "secret").Return(orgSecret, nil)
+		s.On("SecretDelete", orgSecret).Return(nil)
+		s.On("OrgSecretFind", int64(1), "missing").Return(nil, types.ErrRecordNotExist)
+
+		db := secret.NewDB(s)
+		assert.NoError(t, db.OrgSecretDelete(1, "secret"))
+		assert.ErrorIs(t, db.OrgSecretDelete(1, "missing"), types.ErrRecordNotExist)
+	})
+
+	t.Run("global", func(t *testing.T) {
+		s := store_mocks.NewMockStore(t)
+		s.On("GlobalSecretFind", "secret").Return(globalSecret, nil)
+		s.On("SecretDelete", globalSecret).Return(nil)
+		s.On("GlobalSecretFind", "missing").Return(nil, types.ErrRecordNotExist)
+
+		db := secret.NewDB(s)
+		assert.NoError(t, db.GlobalSecretDelete("secret"))
+		assert.ErrorIs(t, db.GlobalSecretDelete("missing"), types.ErrRecordNotExist)
+	})
+
+	t.Run("store error on delete", func(t *testing.T) {
+		s := store_mocks.NewMockStore(t)
+		s.On("GlobalSecretFind", "secret").Return(globalSecret, nil)
+		s.On("SecretDelete", mock.Anything).Return(assert.AnError)
+
+		assert.ErrorIs(t, secret.NewDB(s).GlobalSecretDelete("secret"), assert.AnError)
+	})
+}
+
+func TestSecretListPipelineStoreError(t *testing.T) {
+	s := store_mocks.NewMockStore(t)
+	s.On("SecretList", mock.Anything, mock.Anything, mock.Anything).Return(nil, assert.AnError)
+
+	_, err := secret.NewDB(s).SecretListPipeline(t.Context(), &model.Repo{}, &model.Pipeline{}, nil)
+	assert.ErrorIs(t, err, assert.AnError)
 }

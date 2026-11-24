@@ -18,7 +18,7 @@ You can also restrict the registration:
   WOODPECKER_ADMIN=john.smith,jane_doe
   ```
 
-- open registration and filtering by organizational affiliation with the setting `WOODPECKER_ORGS`
+- open registration and filtering by organizational affiliation with the setting `WOODPECKER_ORGS`. For GitLab forges group names have to exact match, so members of group `group` are not permitted access if you set `WOODPECKER_ORGS=group/subgroup`.
 
   ```ini
   WOODPECKER_OPEN=true
@@ -400,98 +400,26 @@ woodpecker_waiting_steps 0
 # HELP woodpecker_worker_count Total number of workers.
 # TYPE woodpecker_worker_count gauge
 woodpecker_worker_count 4
+# HELP woodpecker_step_failures_total Total number of pipeline step failures.
+# TYPE woodpecker_step_failures_total counter
+woodpecker_step_failures_total{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker"} 1
+# HELP woodpecker_step_duration_seconds Step duration in seconds.
+# TYPE woodpecker_step_duration_seconds histogram
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="1"} 0
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="5"} 0
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="10"} 0
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="30"} 1
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="60"} 1
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="300"} 1
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="600"} 1
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="1800"} 1
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="3600"} 1
+woodpecker_step_duration_seconds_bucket{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker",le="+Inf"} 1
+woodpecker_step_duration_seconds_sum{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker"} 12
+woodpecker_step_duration_seconds_count{repo="woodpecker-ci/woodpecker",step="deploy",workflow="woodpecker"} 1
 ```
 
-## External Configuration API
-
-To provide additional management and preprocessing capabilities for pipeline configurations Woodpecker supports an HTTP API which can be enabled to call an external config service.
-Before the run or restart of any pipeline Woodpecker will make a POST request to an external HTTP API sending the current repository, build information and all current config files retrieved from the repository. The external API can then send back new pipeline configurations that will be used immediately or respond with `HTTP 204` to tell the system to use the existing configuration.
-
-Every request sent by Woodpecker is signed using a [http-signature](https://datatracker.ietf.org/doc/html/rfc9421) by a private key (ed25519) generated on the first start of the Woodpecker server. You can get the public key for the verification of the http-signature from `http(s)://your-woodpecker-server/api/signature/public-key`.
-
-A simplistic example configuration service can be found here: [https://github.com/woodpecker-ci/example-config-service](https://github.com/woodpecker-ci/example-config-service)
-
-:::warning
-You need to trust the external config service as it is getting secret information about the repository and pipeline and has the ability to change pipeline configs that could run malicious tasks.
-:::
-
-### Configuration
-
-```ini title="Server"
-WOODPECKER_CONFIG_SERVICE_ENDPOINT=https://example.com/ciconfig
-```
-
-#### Example request made by Woodpecker
-
-```json
-{
-  "repo": {
-    "id": 100,
-    "uid": "",
-    "user_id": 0,
-    "namespace": "",
-    "name": "woodpecker-test-pipe",
-    "slug": "",
-    "scm": "git",
-    "git_http_url": "",
-    "git_ssh_url": "",
-    "link": "",
-    "default_branch": "",
-    "private": true,
-    "visibility": "private",
-    "active": true,
-    "config": "",
-    "trusted": false,
-    "protected": false,
-    "ignore_forks": false,
-    "ignore_pulls": false,
-    "cancel_pulls": false,
-    "timeout": 60,
-    "counter": 0,
-    "synced": 0,
-    "created": 0,
-    "updated": 0,
-    "version": 0
-  },
-  "pipeline": {
-    "author": "myUser",
-    "author_avatar": "https://myforge.com/avatars/d6b3f7787a685fcdf2a44e2c685c7e03",
-    "author_email": "my@email.com",
-    "branch": "main",
-    "changed_files": ["some-file-name.txt"],
-    "commit": "2fff90f8d288a4640e90f05049fe30e61a14fd50",
-    "created_at": 0,
-    "deploy_to": "",
-    "enqueued_at": 0,
-    "error": "",
-    "event": "push",
-    "finished_at": 0,
-    "id": 0,
-    "link_url": "https://myforge.com/myUser/woodpecker-testpipe/commit/2fff90f8d288a4640e90f05049fe30e61a14fd50",
-    "message": "test old config\n",
-    "number": 0,
-    "parent": 0,
-    "ref": "refs/heads/main",
-    "refspec": "",
-    "clone_url": "",
-    "reviewed_at": 0,
-    "reviewed_by": "",
-    "sender": "myUser",
-    "signed": false,
-    "started_at": 0,
-    "status": "",
-    "timestamp": 1645962783,
-    "title": "",
-    "updated_at": 0,
-    "verified": false
-  },
-  "netrc": {
-    "machine": "https://example.com",
-    "login": "user",
-    "password": "password"
-  }
-}
-```
+Step-level metrics are exported as long as `WOODPECKER_STEP_LEVEL_METRICS` is not disabled.
 
 #### Example response structure
 
@@ -611,6 +539,15 @@ Time an active database connection is allowed to stay open.
 
 ---
 
+### DATABASE_MAX_RETRIES
+
+- Name: `WOODPECKER_DATABASE_MAX_RETRIES`
+- Default: `10`
+
+Maximum number of retries for the initial connection to the database.
+
+---
+
 ### DEBUG_PRETTY
 
 - Name: `WOODPECKER_DEBUG_PRETTY`
@@ -649,7 +586,16 @@ Examples:
 - Name: `WOODPECKER_SERVER_ADDR`
 - Default: `:8000`
 
-Configures the HTTP listener port.
+Configures the HTTP listener, supports unix socket via unix:// prefix".
+
+---
+
+### UNIX_SOCKET_PERMISSION
+
+- Name: `WOODPECKER_UNIX_SOCKET_PERMISSION`
+- Default: none
+
+File mode for the HTTP unix socket when `WOODPECKER_SERVER_ADDR` uses the `unix://` prefix, for example `660` or `666`.
 
 ---
 
@@ -715,16 +661,27 @@ Example: `WOODPECKER_CUSTOM_JS_FILE=/usr/local/www/woodpecker.js`
 - Name: `WOODPECKER_GRPC_ADDR`
 - Default: `:9000`
 
-Configures the gRPC listener port.
+Configures the gRPC listener. Use `localhost:9000` or any IP address to bind it to a specific interface.
+If you want an unix socket use `unix://` prefix, for example `unix:///run/woodpecker-grcp.sock`.
 
 ---
 
 ### GRPC_SECRET
 
 - Name: `WOODPECKER_GRPC_SECRET`
-- Default: `secret`
+- Default: none
 
-Configures the gRPC JWT secret.
+Configures the secret used to sign JWTs for gRPC connections.
+
+If this setting is empty, the server generates a secure temporary secret and logs a warning. The generated secret is not persisted and changes each time the server starts. Configure and persist a secret to keep it stable across restarts. Setting this explicitly is important for high availability (HA) setups with multiple server replicas: each replica would otherwise generate its own secret and reject the gRPC tokens issued by the other replicas. Generate a secure secret with:
+
+```shell
+openssl rand -hex 32
+```
+
+Store the generated value securely and provide it through `WOODPECKER_GRPC_SECRET` or `WOODPECKER_GRPC_SECRET_FILE`.
+
+After this secret is rotated, connected agents reauthenticate when the server rejects their old token. Agents do not need to be restarted as long as `WOODPECKER_AGENT_SECRET` remains unchanged.
 
 ---
 
@@ -733,7 +690,7 @@ Configures the gRPC JWT secret.
 - Name: `WOODPECKER_GRPC_SECRET_FILE`
 - Default: none
 
-Read the value for `WOODPECKER_GRPC_SECRET` from the specified filepath.
+Read the value for `WOODPECKER_GRPC_SECRET` from the specified filepath. The file should be stored persistently and only be readable by the Woodpecker server.
 
 ---
 
@@ -748,14 +705,31 @@ Example: `:9001`
 
 ---
 
+### STEP_LEVEL_METRICS
+
+- Name: `WOODPECKER_STEP_LEVEL_METRICS`
+- Default: `true`
+
+Enable step-level metrics, including failed step counters and step duration histograms.
+
+---
+
 ### ADMIN
 
 - Name: `WOODPECKER_ADMIN`
 - Default: none
 
-Comma-separated list of admin accounts.
+Comma-separated list of users who become server admins when they sign in.
+The list is read at server start.
+With [multiple forges](./12-forges/11-overview.md#known-limitations), a user with a listed login on any connected forge becomes admin.
 
 Example: `WOODPECKER_ADMIN=user1,user2`
+
+:::warning
+The list only grants admin access, it never revokes it.
+To revoke a listed user, revoke admin access in the admin settings or with the users API and also remove them from the list.
+Otherwise they are admin again at their first sign in after the next server restart.
+:::
 
 ---
 
@@ -764,9 +738,12 @@ Example: `WOODPECKER_ADMIN=user1,user2`
 - Name: `WOODPECKER_ORGS`
 - Default: none
 
-Comma-separated list of approved organizations.
+Comma-separated list of approved organizations. For GitLab forges this is the `full_path` [attribute](https://docs.gitlab.com/api/groups/).
 
 Example: `org1,org2`
+
+This setting applies to all [forges](./12-forges/11-overview.md). A forge can allow further organizations in addition, configured in the admin UI (`Settings` -> `Forges` -> `Advanced options`). As organization names are only unique within a single forge, someone could create an organization with a name from this setting on another connected forge to gain access.
+If you connected more than one forge, you should therefore leave this setting empty and configure the allowed organizations per forge. See [restricting who can log in](./12-forges/11-overview.md#restricting-who-can-log-in) for details.
 
 ---
 
@@ -799,6 +776,19 @@ Always use authentication to clone repositories even if they are public. Needed 
 
 ---
 
+### ASYNC_REPOSITORY_UPDATE
+
+- Name: `WOODPECKER_ASYNC_REPOSITORY_UPDATE`
+- Default: `false`
+
+Enable asynchronous fetching user permissions for repositories. Will drastically improve login speed for user login if the organisation has many git repositories.
+
+When disabled (default) users will have to wait for all repository access information before being redirected to the Woodpecker homepage. Choose this for strong consistency.
+
+When enabled users will immediately be redirected to the Woodpecker homepage, but might see outdated information if repository access changed or new repositories were added. Choose this for eventual consistency.
+
+---
+
 ### DEFAULT_ALLOW_PULL_REQUESTS
 
 - Name: `WOODPECKER_DEFAULT_ALLOW_PULL_REQUESTS`
@@ -814,6 +804,8 @@ The default setting for allowing pull requests on a repo.
 - Default: `forks`
 
 The default setting for the approval mode on a repo. Possible values: `none`, `forks`, `pull_requests` or `all_events`.
+
+Also see [security boundaries](../../20-usage/17-security-boundaries.md#approval-of-pipelines).
 
 ---
 
@@ -860,6 +852,24 @@ The maximum time in minutes you can set in the repo settings before a pipeline g
 
 ---
 
+### MAX_PIPELINE_LOG_LINE_COUNT
+
+- Name: `WOODPECKER_MAX_PIPELINE_LOG_LINE_COUNT`
+- Default: `5000`
+
+Maximum number of lines to show in a pipeline log.
+
+---
+
+### WEBHOOK_SYNC_TIMEOUT
+
+- Name: `WOODPECKER_WEBHOOK_SYNC_TIMEOUT`
+- Default: `5s`
+
+Maximum time to wait for the pipeline creation triggered by an incoming webhook. After that, the server responds with `202 Accepted` and finishes it in the background. `0` disables the fallback and always responds synchronously.
+
+---
+
 ### SESSION_EXPIRES
 
 - Name: `WOODPECKER_SESSION_EXPIRES`
@@ -879,6 +889,8 @@ Docker images to run in privileged mode. Only change if you are sure what you do
 
 You should specify the tag of your images too, as this enforces exact matches.
 
+Also see [security boundaries](../../20-usage/17-security-boundaries.md#plugins).
+
 ### PLUGINS_TRUSTED_CLONE
 
 - Name: `WOODPECKER_PLUGINS_TRUSTED_CLONE`
@@ -888,6 +900,8 @@ Plugins which are trusted to handle the Git credential info in clone steps.
 If a clone step use an image not in this list, Git credentials will not be injected and users have to use other methods (e.g. secrets) to clone non-public repos.
 
 You should specify the tag of your images too, as this enforces exact matches.
+
+Also see [security boundaries](../../20-usage/17-security-boundaries.md#git-credentials).
 
 <!-- ---
 
@@ -965,6 +979,8 @@ If an instance admin doesn't want this feature enabled, they can disable the API
 You should set this option if you have, for example,
 global secrets and don't trust your users to create a rogue agent and pipeline for secret extraction.
 :::
+
+Also see [security boundaries](../../20-usage/17-security-boundaries.md#agents-and-backends).
 
 ---
 
@@ -1062,25 +1078,122 @@ Supported variables:
 
 ---
 
-### CONFIG_SERVICE_ENDPOINT
+### CONFIG_EXTENSION_ENDPOINT
 
-- Name: `WOODPECKER_CONFIG_SERVICE_ENDPOINT`
+- Name: `WOODPECKER_CONFIG_EXTENSION_ENDPOINT`
 - Default: none
 
-Specify a configuration service endpoint, see [Configuration Extension](#external-configuration-api)
+Specify a configuration extension endpoint, see [Configuration Extension](../../20-usage/72-extensions/40-configuration-extension.md)
+
+---
+
+### DEFAULT_PIPELINE_CONFIGS
+
+- Name: `WOODPECKER_DEFAULT_PIPELINE_CONFIGS`
+- Default: `.woodpecker/`, `.woodpecker.yaml`, `.woodpecker.yml`
+
+Specify the default pipeline config paths.
+
+---
+
+### DEFAULT_PIPELINE_CONFIG_EXTENSIONS
+
+- Name: `WOODPECKER_DEFAULT_PIPELINE_CONFIG_EXTENSIONS`
+- Default: `.yaml`, `.yml`
+
+Specify the default pipeline config extensions when scanning a pipeline config directory.
+
+---
+
+### CONFIG_EXTENSION_EXCLUSIVE
+
+- Name: `WOODPECKER_CONFIG_EXTENSION_EXCLUSIVE`
+- Default: false
+
+Whether the forge request should be skipped for the global configuration endpoint.
+
+:::warning
+If you enable this, all repos will exclusively use the global config service endpoint. There is no possibility to directly define pipelines in the forge, except the extension handles this case itself as well.
+:::
+
+---
+
+### CONFIG_EXTENSION_NETRC
+
+- Name: `WOODPECKER_CONFIG_EXTENSION_NETRC`
+- Default: false
+
+Send `netrc` to the config extension endpoint.
+
+:::warning
+The `netrc` data is pretty powerful as it contains credentials to access the repository. You can use this to clone the repository or even use the forge API to get more information about the repository.
+:::
+
+---
+
+### SECRET_EXTENSION_ENDPOINT
+
+- Name: `WOODPECKER_SECRET_EXTENSION_ENDPOINT`
+- Default: none
+
+Specify a secret extension endpoint, see [Secret Extension](../../20-usage/72-extensions/55-secret-extension.md)
+
+---
+
+### SECRET_EXTENSION_NETRC
+
+- Name: `WOODPECKER_SECRET_EXTENSION_NETRC`
+- Default: false
+
+Send `netrc` to the secret extension endpoint.
+
+:::warning
+The `netrc` data is pretty powerful as it contains credentials to access the repository. You can use this to clone the repository or even use the forge API to get more information about the repository.
+:::
+
+---
+
+### REGISTRY_EXTENSION_ENDPOINT
+
+- Name: `WOODPECKER_REGISTRY_EXTENSION_ENDPOINT`
+- Default: none
+
+Specify a registry extension endpoint, see [Registry Extension](../../20-usage/72-extensions/50-registry-extension.md)
+
+---
+
+### REGISTRY_EXTENSION_NETRC
+
+- Name: `WOODPECKER_REGISTRY_EXTENSION_NETRC`
+- Default: false
+
+Send `netrc` to the registry extension endpoint.
+
+:::warning
+The `netrc` data is pretty powerful as it contains credentials to access the repository. You can use this to clone the repository or even use the forge API to get more information about the repository.
+:::
+
+---
+
+### EXTENSIONS_ALLOWED_HOSTS
+
+- Name: `WOODPECKER_EXTENSIONS_ALLOWED_HOSTS`
+- Default: `external`
+
+Comma-separated list of hosts that are allowed to be contacted by extensions. Possible values are `loopback`, `private`, `external`, `*` or CIDR list.
+
+Also see [security boundaries](../../20-usage/17-security-boundaries.md#extensions).
 
 ---
 
 ### FORGE_TIMEOUT
 
 - Name: `WOODPECKER_FORGE_TIMEOUT`
-- Default: 15s
+- Default: 30s
 
 Specify timeout when fetching the Woodpecker configuration from forge. See <https://pkg.go.dev/time#ParseDuration> for syntax reference.
 
 GitHub webhooks must receive a 2xx response within **10 seconds** or the delivery is marked timed out. Raising this value is only safe when [`WOODPECKER_WEBHOOK_SYNC_TIMEOUT`](#webhook_sync_timeout) is **non-zero** (default 5s): Woodpecker acknowledges the webhook quickly (or after the sync wait) and continues forge config fetch in the background. Do **not** set a long forge timeout with `WOODPECKER_WEBHOOK_SYNC_TIMEOUT=0`, or GitHub may time out the delivery. Keep the sync timeout itself under GitHub's ~10s budget (for example do not set it to 15s).
-
-For monorepos with many files under `.woodpecker/`, 15–30s is a reasonable forge-timeout range once async webhook ack is in place.
 
 ---
 
@@ -1090,17 +1203,6 @@ For monorepos with many files under `.woodpecker/`, 15–30s is a reasonable for
 - Default: 3
 
 Specify how many retries of fetching the Woodpecker configuration from a forge are done before we fail.
-
----
-
-### WEBHOOK_SYNC_TIMEOUT
-
-- Name: `WOODPECKER_WEBHOOK_SYNC_TIMEOUT`
-- Default: 5s
-
-Maximum time to wait for pipeline creation triggered by an incoming webhook before responding **202 Accepted** and finishing creation in the background. Set to `0` to wait for creation to finish before responding (still subject to the 2m background create cap).
-
-This exists so forge providers with a hard webhook response deadline (GitHub: 10s) do not mark deliveries as timed out when config fetch or pipeline setup is slow. Background creation is capped at 2 minutes.
 
 ---
 
@@ -1127,7 +1229,11 @@ Disable version check in admin web UI.
 - Name: `WOODPECKER_LOG_STORE`
 - Default: `database`
 
-Where to store logs. Possible values: `database` or `file`.
+Where to store logs. Possible values:
+
+- `database`: stores the logs in the database
+- `file`: stores logs in JSON files on the files system
+- `addon`: uses an [addon](./100-addons.md#log) to store logs
 
 ---
 
@@ -1136,7 +1242,10 @@ Where to store logs. Possible values: `database` or `file`.
 - Name: `WOODPECKER_LOG_STORE_FILE_PATH`
 - Default: none
 
-Directory to store logs in if [`WOODPECKER_LOG_STORE`](#log_store) is `file`.
+If [`WOODPECKER_LOG_STORE`](#log_store) is:
+
+- `file`: Directory to store logs in
+- `addon`: The path to the addon executable
 
 ---
 
@@ -1163,6 +1272,19 @@ This option is not required in most cases and should only be used if you know wh
 :::
 
 Fully qualified public forge URL, used if forge url is not a public URL. Format: `<scheme>://<host>[/<prefix path>]`.
+
+---
+
+### FORCE_IGNORE_SERVICE_FAILURE
+
+- Name: `WOODPECKER_FORCE_IGNORE_SERVICE_FAILURE`
+- Default: true
+
+:::warning
+Since v3.14.0, Woodpecker can report the status of services and detached steps.
+Because these can now fail, until v4.0.0 is released, service failures are ignored by default to preserve backward compatibility.
+We encourage you to disable this option and update your pipeline configuration.
+:::
 
 ---
 

@@ -19,7 +19,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"xorm.io/xorm"
 	"xorm.io/xorm/schemas"
 )
@@ -38,11 +38,15 @@ func testDriverConfig() (driver, config string) {
 // newTestStore creates a new database connection for testing purposes.
 // The database driver and connection string are provided by
 // environment variables, with fallback to in-memory sqlite.
-func newTestStore(t *testing.T, tables ...any) (*storage, func()) {
+func newTestStore(t *testing.T, tables ...any) (store *storage, closer func()) {
 	engine, err := xorm.NewEngine(testDriverConfig())
-	if !assert.NoError(t, err) {
-		t.FailNow()
-	}
+	require.NoError(t, err)
+
+	// MaxOpenConns=1 and MaxIdleConns=1 are required for in-memory sqlite:
+	// without them the pool drops idle connections, destroying the in-memory
+	// schema between calls and breaking migrations.
+	engine.SetMaxOpenConns(1)
+	engine.SetMaxIdleConns(1)
 
 	for _, table := range tables {
 		if err := engine.Sync(table); err != nil {
@@ -52,27 +56,27 @@ func newTestStore(t *testing.T, tables ...any) (*storage, func()) {
 	}
 
 	return &storage{
-			engine: engine,
-		}, func() {
-			for _, bean := range tables {
-				if err := engine.DropIndexes(bean); err != nil {
-					t.Error(err)
-					t.FailNow()
-				}
-			}
-			if err := engine.DropTables(tables...); err != nil {
+		engine: engine,
+	}, func() {
+		for _, bean := range tables {
+			if err := engine.DropIndexes(bean); err != nil {
 				t.Error(err)
 				t.FailNow()
-			}
-			if err := engine.Close(); err != nil {
-				t.Error(err)
-				t.FailNow()
-			}
-
-			dbType := engine.Dialect().URI().DBType
-			if dbType == schemas.MYSQL || dbType == schemas.POSTGRES {
-				// wait for mysql/postgres to sync ...
-				time.Sleep(10 * time.Millisecond)
 			}
 		}
+		if err := engine.DropTables(tables...); err != nil {
+			t.Error(err)
+			t.FailNow()
+		}
+		if err := engine.Close(); err != nil {
+			t.Error(err)
+			t.FailNow()
+		}
+
+		dbType := engine.Dialect().URI().DBType
+		if dbType == schemas.MYSQL || dbType == schemas.POSTGRES {
+			// wait for mysql/postgres to sync ...
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 }

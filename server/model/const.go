@@ -23,14 +23,15 @@ import (
 type WebhookEvent string //	@name	WebhookEvent
 
 const (
-	EventPush       WebhookEvent = "push"
-	EventPull       WebhookEvent = "pull_request"
-	EventPullClosed WebhookEvent = "pull_request_closed"
-	EventTag        WebhookEvent = "tag"
-	EventRelease    WebhookEvent = "release"
-	EventDeploy     WebhookEvent = "deployment"
-	EventCron       WebhookEvent = "cron"
-	EventManual     WebhookEvent = "manual"
+	EventPush         WebhookEvent = "push"
+	EventPull         WebhookEvent = "pull_request"
+	EventPullClosed   WebhookEvent = "pull_request_closed"
+	EventPullMetadata WebhookEvent = "pull_request_metadata"
+	EventTag          WebhookEvent = "tag"
+	EventRelease      WebhookEvent = "release"
+	EventDeploy       WebhookEvent = "deployment"
+	EventCron         WebhookEvent = "cron"
+	EventManual       WebhookEvent = "manual"
 )
 
 type WebhookEventList []WebhookEvent
@@ -43,7 +44,7 @@ var ErrInvalidWebhookEvent = errors.New("invalid webhook event")
 
 func (s WebhookEvent) Validate() error {
 	switch s {
-	case EventPush, EventPull, EventPullClosed, EventTag, EventRelease, EventDeploy, EventCron, EventManual:
+	case EventPush, EventPull, EventPullClosed, EventPullMetadata, EventTag, EventRelease, EventDeploy, EventCron, EventManual:
 		return nil
 	default:
 		return fmt.Errorf("%w: %s", ErrInvalidWebhookEvent, s)
@@ -54,12 +55,13 @@ func (s WebhookEvent) Validate() error {
 type StatusValue string //	@name	StatusValue
 
 const (
-	StatusSkipped  StatusValue = "skipped"  // skipped as another step failed
+	StatusSkipped  StatusValue = "skipped"  // skipped as per condition of current workflow failed/success state
 	StatusPending  StatusValue = "pending"  // pending to be executed
 	StatusRunning  StatusValue = "running"  // currently running
 	StatusSuccess  StatusValue = "success"  // successfully finished
 	StatusFailure  StatusValue = "failure"  // failed to finish (exit code != 0)
 	StatusKilled   StatusValue = "killed"   // killed by user
+	StatusCanceled StatusValue = "canceled" // canceled but hasn't been started
 	StatusError    StatusValue = "error"    // error with the config / while parsing / some other system problem
 	StatusBlocked  StatusValue = "blocked"  // waiting for approval
 	StatusDeclined StatusValue = "declined" // blocked and declined
@@ -70,7 +72,7 @@ var ErrInvalidStatusValue = errors.New("invalid status value")
 
 func (s StatusValue) Validate() error {
 	switch s {
-	case StatusSkipped, StatusPending, StatusRunning, StatusSuccess, StatusFailure, StatusKilled, StatusError, StatusBlocked, StatusDeclined, StatusCreated:
+	case StatusSkipped, StatusPending, StatusRunning, StatusSuccess, StatusFailure, StatusKilled, StatusCanceled, StatusError, StatusBlocked, StatusDeclined, StatusCreated:
 		return nil
 	default:
 		return fmt.Errorf("%w: %s", ErrInvalidStatusValue, s)

@@ -2,6 +2,7 @@ import ApiClient, { encodeQueryString } from './client';
 import type {
   Agent,
   Cron,
+  ExtensionSettings,
   Forge,
   Org,
   OrgPermissions,
@@ -17,7 +18,10 @@ import type {
   RepoSettings,
   Secret,
   User,
+  WorkflowInfo,
 } from './types';
+
+export const DEFAULT_FORGE_ID = 1;
 
 interface RepoListOptions {
   all?: boolean;
@@ -27,6 +31,8 @@ interface RepoListOptions {
 interface PipelineOptions {
   branch: string;
   variables: Record<string, string>;
+  // only run this workflow and its hard dependencies
+  workflow?: string;
 }
 
 interface DeploymentOptions {
@@ -45,6 +51,10 @@ export default class WoodpeckerClient extends ApiClient {
   async getRepoList(opts?: RepoListOptions): Promise<Repo[]> {
     const query = encodeQueryString(opts);
     return this._get(`/api/user/repos?${query}`) as Promise<Repo[]>;
+  }
+
+  async refreshRepoList(): Promise<unknown> {
+    return this._post(`/api/user/repos/refresh`);
   }
 
   async lookupRepo(owner: string, name: string): Promise<Repo | undefined> {
@@ -73,7 +83,7 @@ export default class WoodpeckerClient extends ApiClient {
     return this._post(`/api/repos?forge_remote_id=${forgeRemoteId}`) as Promise<Repo>;
   }
 
-  async updateRepo(repoId: number, repoSettings: RepoSettings): Promise<unknown> {
+  async updateRepo(repoId: number, repoSettings: Partial<RepoSettings & ExtensionSettings>): Promise<unknown> {
     return this._patch(`/api/repos/${repoId}`, repoSettings);
   }
 
@@ -86,8 +96,13 @@ export default class WoodpeckerClient extends ApiClient {
     return this._post(`/api/repos/${repoId}/repair`);
   }
 
-  async createPipeline(repoId: number, options: PipelineOptions): Promise<Pipeline> {
-    return this._post(`/api/repos/${repoId}/pipelines`, options) as Promise<Pipeline>;
+  async getRepoWorkflows(repoId: number, branch: string): Promise<WorkflowInfo[]> {
+    const query = encodeQueryString({ branch });
+    return this._get(`/api/repos/${repoId}/workflows?${query}`) as Promise<WorkflowInfo[]>;
+  }
+
+  async createPipeline(repoId: number, options: PipelineOptions): Promise<Pipeline | string> {
+    return this._post(`/api/repos/${repoId}/pipelines`, options) as Promise<Pipeline | string>;
   }
 
   // Deploy triggers a deployment for an existing pipeline using the
@@ -251,6 +266,10 @@ export default class WoodpeckerClient extends ApiClient {
     return this._get(`/api/orgs/${orgId}`) as Promise<Org>;
   }
 
+  async updateOrg(orgId: number, org: Partial<Org>): Promise<Org> {
+    return this._patch(`/api/orgs/${orgId}`, org) as Promise<Org>;
+  }
+
   async lookupOrg(name: string): Promise<Org> {
     return this._get(`/api/orgs/lookup/${name}`) as Promise<Org>;
   }
@@ -303,6 +322,10 @@ export default class WoodpeckerClient extends ApiClient {
 
   async getToken(): Promise<string> {
     return this._post('/api/user/token') as Promise<string>;
+  }
+
+  async getSignaturePublicKey(): Promise<string> {
+    return this._get('/api/signature/public-key') as Promise<string>;
   }
 
   async getAgents(opts?: PaginationOptions): Promise<Agent[] | null> {
@@ -381,8 +404,9 @@ export default class WoodpeckerClient extends ApiClient {
     return this._get(`/api/users?${query}`) as Promise<User[] | null>;
   }
 
-  async getUser(username: string): Promise<User> {
-    return this._get(`/api/users/${username}`) as Promise<User>;
+  async getUser(username: string, forgeID?: number): Promise<User> {
+    const forge = forgeID ?? DEFAULT_FORGE_ID;
+    return this._get(`/api/users/${username}?forge_id=${forge}`) as Promise<User>;
   }
 
   async createUser(user: Partial<User>): Promise<User> {
@@ -394,7 +418,7 @@ export default class WoodpeckerClient extends ApiClient {
   }
 
   async deleteUser(user: User): Promise<unknown> {
-    return this._delete(`/api/users/${user.login}`);
+    return this._delete(`/api/users/${user.login}?forge_id=${user.forge_id}`);
   }
 
   async resetToken(): Promise<string> {

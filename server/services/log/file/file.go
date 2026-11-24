@@ -1,18 +1,33 @@
+// Copyright 2024 Woodpecker Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package file
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	logger "github.com/rs/zerolog/log"
+	"github.com/rs/zerolog/log"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
-	"go.woodpecker-ci.org/woodpecker/v3/server/services/log"
+	service_log "go.woodpecker-ci.org/woodpecker/v3/server/services/log"
 )
 
 const (
@@ -24,7 +39,7 @@ type logStore struct {
 	base string
 }
 
-func NewLogStore(base string) (log.Service, error) {
+func NewLogStore(base string) (service_log.Service, error) {
 	if base == "" {
 		return nil, fmt.Errorf("file storage base path is required")
 	}
@@ -41,7 +56,7 @@ func (l logStore) filePath(id int64) string {
 	return filepath.Join(l.base, fmt.Sprintf("%d.json", id))
 }
 
-func (l logStore) LogFind(step *model.Step) ([]*model.LogEntry, error) {
+func (l logStore) LogFind(_ context.Context, step *model.Step) ([]*model.LogEntry, error) {
 	filename := l.filePath(step.ID)
 	file, err := os.Open(filename)
 	if err != nil {
@@ -50,6 +65,7 @@ func (l logStore) LogFind(step *model.Step) ([]*model.LogEntry, error) {
 		}
 		return nil, err
 	}
+	defer file.Close()
 
 	buf := make([]byte, 0, bufio.MaxScanTokenSize)
 	s := bufio.NewScanner(file)
@@ -72,12 +88,12 @@ func (l logStore) LogFind(step *model.Step) ([]*model.LogEntry, error) {
 	return entries, nil
 }
 
-func (l logStore) LogAppend(step *model.Step, logEntries []*model.LogEntry) error {
+func (l logStore) LogAppend(_ context.Context, step *model.Step, logEntries []*model.LogEntry) error {
 	path := l.filePath(step.ID)
 
 	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		logger.Error().Err(err).Msgf("could not open log file %s", path)
+		log.Error().Err(err).Msgf("could not open log file %s", path)
 		return err
 	}
 
@@ -88,17 +104,24 @@ func (l logStore) LogAppend(step *model.Step, logEntries []*model.LogEntry) erro
 			bytes = append(bytes, jsonLine...)
 			bytes = append(bytes, byte('\n'))
 		} else {
-			logger.Error().Err(err).Msg("could not convert log entry to JSON")
+			log.Error().Err(err).Msg("could not convert log entry to JSON")
 		}
 	}
 
 	if _, err = file.Write(bytes); err != nil {
-		logger.Error().Err(err).Msg("could not write out log entries")
+		log.Error().Err(err).Msg("could not write out log entries")
 	}
 
 	return file.Close()
 }
 
-func (l logStore) LogDelete(step *model.Step) error {
-	return os.Remove(l.filePath(step.ID))
+func (l logStore) LogDelete(_ context.Context, step *model.Step) error {
+	err := os.Remove(l.filePath(step.ID))
+	if os.IsNotExist(err) {
+		// a step that never wrote a log has nothing to delete
+		return nil
+	}
+	return err
 }
+
+func (l logStore) StepFinished(_ context.Context, _ *model.Step) error { return nil }

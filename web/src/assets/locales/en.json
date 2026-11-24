@@ -1,7 +1,7 @@
 {
   "cancel": "Cancel",
-  "login_to_woodpecker_with": "Login to Woodpecker with",
-  "login": "Login",
+  "login_to_woodpecker_with": "Sign in to Woodpecker with",
+  "login": "Sign in",
   "repos": "Repos",
   "repositories": {
     "title": "Repositories",
@@ -16,7 +16,7 @@
   },
   "docs": "Docs",
   "api": "API",
-  "logout": "Logout",
+  "logout": "Sign out",
   "search": "Search…",
   "username": "Username",
   "password": "Password",
@@ -48,7 +48,18 @@
         "name": "Variable name",
         "value": "Variable value"
       },
-      "show_pipelines": "Show pipelines"
+      "message": {
+        "title": "Message",
+        "desc": "This message is added to the pipeline's message as additional information."
+      },
+      "workflow": {
+        "title": "Workflow",
+        "desc": "Run only the selected workflow and its hard dependencies.",
+        "all": "All workflows",
+        "load_error": "Could not load the workflows of this branch. Check that the branch exists and its pipeline config is valid."
+      },
+      "show_pipelines": "Show pipelines",
+      "no_manual_workflows": "No matching workflows found. Make sure at least one workflow runs on the manual event."
     },
     "deploy_pipeline": {
       "title": "Trigger a deployment for current pipeline #{pipelineId}",
@@ -67,13 +78,20 @@
     "branches": "Branches",
     "pull_requests": "Pull requests",
     "add": "Add repository",
+    "refresh": "Refresh repository list",
     "user_none": "This organization/user has no projects yet",
     "not_allowed": "You are not allowed to access this repository",
+    "perm_sync_failed": "Your permissions for this repository could not be synced with the forge. Your access is temporarily degraded to read-only.",
     "enable": {
       "enable": "Enable",
       "enabled": "Already enabled",
       "disabled": "Disabled",
-      "success": "Repository enabled"
+      "success": "Repository enabled",
+      "new_forge_repo": "new repo on forge",
+      "stale_wp_repo": "outdated Woodpecker repo",
+      "conflict": "Conflict",
+      "conflict_desc": "This repository was recreated on the forge with a new ID, but an outdated entry with the same name still exists in Woodpecker. Delete the outdated to enable the new one or Repair the old.",
+      "forge_repo_missing": "Forge repo is missing!"
     },
     "open_in_forge": "Open repository in forge",
     "visibility": {
@@ -100,7 +118,7 @@
         "success": "Project settings updated",
         "pipeline_path": {
           "path": "Pipeline path",
-          "default": "By default: .woodpecker/*.{'{yaml,yml}'} -> .woodpecker.yaml -> .woodpecker.yml",
+          "by_default": "By default: {paths}",
           "desc": "Path to your pipeline config (for example {0}). Folders should end with a {1}.",
           "desc_path_example": "my/path/"
         },
@@ -114,7 +132,8 @@
         },
         "netrc_only_trusted": {
           "netrc_only_trusted": "Custom trusted clone plugins",
-          "desc": "Plugins that get access to netrc credentials that can be used to clone repositories from the forge or push them into the forge."
+          "desc": "Plugins that get access to netrc credentials that can be used to clone repositories from the forge or push them into the forge.",
+          "placeholder": "Plugin image"
         },
         "trusted": {
           "trusted": "Trusted",
@@ -150,7 +169,8 @@
         "created": "Cron created",
         "saved": "Cron saved",
         "deleted": "Cron deleted",
-        "next_exec": "Next execution",
+        "next_exec_local": "Next execution: {local}",
+        "next_exec_both": "Next execution: {local} ({zoned} {timezone})",
         "not_executed_yet": "Not executed yet",
         "run": "Run now",
         "branch": {
@@ -162,11 +182,14 @@
           "placeholder": "Name of the cron job"
         },
         "schedule": {
-          "title": "Schedule (based on UTC)",
+          "title": "Schedule",
           "placeholder": "Schedule"
         },
+        "timezone": "Timezone",
+        "your_timezone": "In your browser's timezone.",
         "edit": "Edit cron",
-        "delete": "Delete cron"
+        "delete": "Delete cron",
+        "enabled": "Enabled"
       },
       "badge": {
         "badge": "Badge",
@@ -174,7 +197,10 @@
         "type_url": "URL",
         "type_markdown": "Markdown",
         "type_html": "HTML",
-        "branch": "Branch"
+        "branch": "Branch",
+        "events": "Events",
+        "workflow": "Workflow",
+        "step": "Step"
       },
       "actions": {
         "actions": "Actions",
@@ -202,6 +228,7 @@
       "config": "Config",
       "files": "Changed files",
       "no_pipelines": "No pipelines have been started yet.",
+      "load_more": "Load more",
       "no_pipeline_steps": "No pipeline steps available!",
       "step_not_started": "This step hasn't started yet.",
       "pipelines_for": "Pipelines for branch \"{branch}\"",
@@ -211,20 +238,22 @@
       "no_logs": "No logs",
       "pipeline": "Pipeline #{pipelineId}",
       "log_title": "Step Logs",
-      "log_download_error": "An error occurred while downloading the log file",
       "log_delete_confirm": "Do you really want to delete the step logs?",
       "log_delete_error": "An error occurred when deleting the step logs",
       "actions": {
         "cancel": "Cancel",
         "restart": "Restart",
         "canceled": "This step has been canceled.",
+        "skipped": "This step has been skipped.",
         "cancel_success": "Pipeline canceled",
         "deploy": "Deploy",
         "restart_success": "Pipeline restarted",
         "log_download": "Download",
         "log_delete": "Delete",
         "log_auto_scroll": "Enable automatic scrolling",
-        "log_auto_scroll_off": "Disable automatic scrolling"
+        "log_auto_scroll_off": "Disable automatic scrolling",
+        "expand_all": "Expand all",
+        "collapse_all": "Collapse all"
       },
       "protected": {
         "awaits": "This pipeline is awaiting approval from a maintainer!",
@@ -239,6 +268,7 @@
         "tag": "Tag",
         "pr": "Pull Request",
         "pr_closed": "Pull Request merged/closed",
+        "pr_metadata": "Pull Request metadata changed",
         "deploy": "Deploy",
         "cron": "Cron",
         "manual": "Manual",
@@ -251,6 +281,7 @@
         "running": "running",
         "started": "started",
         "skipped": "skipped",
+        "canceled": "canceled",
         "success": "success",
         "declined": "declined",
         "error": "error",
@@ -261,8 +292,17 @@
       "warnings": "Warnings",
       "show_errors": "Show errors",
       "we_got_some_errors": "Oh no, an error occurred!",
+      "parse_errors": "Parse errors",
+      "runtime_errors": "Runtime errors",
       "duration": "Pipeline duration: {duration}",
       "created": "Created: {created}",
+      "version": "The Woodpecker version this pipeline was executed on.",
+      "version_header": "Woodpecker version",
+      "cancel_info": {
+        "superseded_by": "Superseded by #{pipelineId}",
+        "canceled_by_user": "Canceled by {user}",
+        "canceled_by_step": "Canceled due to {step}"
+      },
       "debug": {
         "title": "Debug",
         "download_metadata": "Download metadata",
@@ -271,7 +311,8 @@
         "no_permission": "You are not allowed to access the debug information",
         "metadata_exec_title": "Re-run pipeline locally",
         "metadata_exec_desc": "Download the metadata of this pipeline to run it locally. This allows you to fix problems and test changes before committing them. The Woodpecker CLI must be installed locally in the same version as the server."
-      }
+      },
+      "view": "View pipeline"
     }
   },
   "org": {
@@ -284,7 +325,12 @@
         "desc": "Organization registry credentials can be added to use private images for all pipelines of an organization."
       },
       "agents": {
-        "desc": "Agents registered for this organization."
+        "desc": "Agents registered for this organization.",
+        "require_org_agents": {
+          "require": "Run pipelines only on organization agents",
+          "desc": "Workflows of this organization's repositories are only picked up by agents registered for this organization, not by server-wide agents.",
+          "saved": "Organization settings saved"
+        }
       }
     }
   },
@@ -341,11 +387,21 @@
           "badge": "org"
         },
         "version": "Version",
-        "last_contact": "Last contact",
+        "last_contact": {
+          "last_contact": "Last contact",
+          "badge": "last contact"
+        },
         "never": "Never",
         "delete_confirm": "Do you really want to delete this agent? It will no longer be able to connect to the server.",
         "edit_agent": "Edit agent",
-        "delete_agent": "Delete agent"
+        "delete_agent": "Delete agent",
+        "filters": {
+          "name": "Filters",
+          "desc": "Server side enforced labels of agents to filter workflows",
+          "key": "Label name",
+          "value": "Filter value",
+          "delete": "Delete filter"
+        }
       },
       "queue": {
         "queue": "Queue",
@@ -371,7 +427,7 @@
       "users": {
         "users": "Users",
         "desc": "Users registered for this server.",
-        "login": "Login",
+        "login": "Username",
         "email": "Email",
         "avatar_url": "Avatar URL",
         "save": "Save user",
@@ -385,10 +441,16 @@
         "saved": "User saved",
         "admin": {
           "admin": "Admin",
-          "placeholder": "User is an admin"
+          "placeholder": "User is an admin",
+          "admin_warning": "This user is listed in WOODPECKER_ADMIN environment configuration. Revoking admin here lasts until the next server restart. To revoke it for good, also remove the user from your environment variables.",
+          "admin_env": "Admin (env)",
+          "admin_env_desc": "Admin because the user is listed in WOODPECKER_ADMIN.",
+          "admin_revoked": "Admin temporarily revoked",
+          "admin_revoked_desc": "The user is listed in WOODPECKER_ADMIN environment configuration, but admin was revoked here. They are admin again at their first sign in after the next server restart, unless they are removed from WOODPECKER_ADMIN."
         },
         "delete_user": "Delete user",
-        "edit_user": "Edit user"
+        "edit_user": "Edit user",
+        "forge": "Forge"
       },
       "orgs": {
         "orgs": "Organizations",
@@ -425,6 +487,13 @@
           "light": "Light",
           "dark": "Dark",
           "auto": "Auto"
+        },
+        "pipeline_logs": {
+          "pipeline_logs": "Pipeline logs",
+          "collapse_groups": {
+            "collapse": "Collapse log groups by default",
+            "desc": "When opening a finished step, collapse all command groups to show only the outline."
+          }
         }
       },
       "secrets": {
@@ -444,7 +513,12 @@
         "swagger_ui": "Swagger UI"
       },
       "agents": {
-        "desc": "Agents registered to your account repos."
+        "desc": "Agents registered to your account repos.",
+        "require_user_agents": {
+          "require": "Run pipelines only on your agents",
+          "desc": "Workflows of your personal repositories are only picked up by agents registered to your account, not by server-wide agents.",
+          "saved": "User settings saved"
+        }
       }
     }
   },
@@ -457,6 +531,7 @@
     "show": "Show secrets",
     "name": "Name",
     "value": "Value",
+    "note": "Note",
     "delete_confirm": "Do you really want to delete this secret?",
     "deleted": "Secret deleted",
     "created": "Secret created",
@@ -498,12 +573,14 @@
   "update_woodpecker": "Please update your Woodpecker instance to {0}",
   "global_level_secret": "global secret",
   "org_level_secret": "organization secret",
-  "login_to_cli": "Login to CLI",
-  "login_to_cli_description": "If you continue, you will be logged in to the CLI.",
+  "global_level_registry": "global registry",
+  "org_level_registry": "organization registry",
+  "login_to_cli": "Sign in to CLI",
+  "login_to_cli_description": "If you continue, you will be signed in to the CLI.",
   "abort": "Abort",
-  "cli_login_success": "Login to CLI successful",
-  "cli_login_failed": "Login to CLI failed",
-  "cli_login_denied": "Login to CLI denied",
+  "cli_login_success": "Sign-in to CLI successful",
+  "cli_login_failed": "Sign-in to CLI failed",
+  "cli_login_denied": "Sign-in to CLI denied",
   "return_to_cli": "You can now close this tab and return to the CLI.",
   "settings": "Settings",
   "oauth_error": "Error while authenticating against OAuth provider",
@@ -512,6 +589,19 @@
   "access_denied": "You are not allowed to access this instance",
   "org_access_denied": "You are not allowed to access this organization",
   "invalid_state": "The OAuth state is invalid",
+  "extensions": "Extensions",
+  "extensions_description": "Extensions are HTTP services that can be called by Woodpecker instead of using the builtin ones.",
+  "extension_endpoint_placeholder": "e.g. https://example.com/api",
+  "config_extension_endpoint": "Config extension endpoint",
+  "registry_extension_endpoint": "Registry extension endpoint",
+  "config_extension_exclusive": "Exclusive",
+  "config_extension_exclusive_desc": "If enabled, will skip all other ways of configuration fetching, including the forge.",
+  "secret_extension_endpoint": "Secret extension endpoint",
+  "extension_netrc": "Include netrc credentials",
+  "extension_netrc_desc": "Send forge netrc credentials to the extension.",
+  "extensions_signatures_public_key": "Public key for signatures",
+  "extensions_signatures_public_key_description": "This public key should be used by your extensions to verify webhook calls from Woodpecker.",
+  "extensions_configuration_saved": "Extensions configuration saved",
   "require_approval": {
     "desc": "Prevent malicious pipelines from exposing secrets or running harmful tasks by approving them before execution.",
     "require_approval_for": "Approval requirements",
@@ -553,6 +643,10 @@
   "executable_desc": "Path to the addon executable.",
   "save": "Save",
   "add": "Add",
+  "delete": "Delete",
+  "allowed_orgs": "Allowed organizations",
+  "allowed_orgs_desc": "Organizations whose members may log in using this forge, in addition to the global WOODPECKER_ORGS setting.",
+  "allowed_orgs_placeholder": "Organization name",
   "skip_verify": "Skip SSL verification",
   "skip_verify_desc": "Skip SSL verification for the API connection. This is not recommended for production use.",
   "url": "URL",
@@ -566,10 +660,14 @@
   "edit_forge": "Edit forge",
   "delete_forge": "Delete forge",
   "no_forges": "There are no forges yet.",
-  "use_this_redirect_uri_to_create": "Use this redirect URI to create or update the OAuth application. Go to {0} and setup the OAuth application.",
-  "developer_settings": "Developer settings",
+  "use_this_redirect_url_to_create": "Use this redirect URL to create or update the OAuth application.",
+  "developer_settings_to_create": "Go to the {0} and set up the OAuth application.",
+  "developer_settings": "developer settings",
   "public_url_for_oauth_if": "Public URL for OAuth if different from URL ({0})",
   "forge_saved": "Forge saved",
   "fullscreen": "Fullscreen",
-  "exit_fullscreen": "Exit fullscreen"
+  "exit_fullscreen": "Exit fullscreen",
+  "help_translating": "You can help translate Woodpecker into your language on {0}.",
+  "weblate": "our Weblate",
+  "disabled": "Disabled"
 }

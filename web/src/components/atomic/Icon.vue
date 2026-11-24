@@ -5,6 +5,7 @@
   <SvgIcon v-else-if="name === 'branch'" :path="mdiSourceBranch" size="1.3rem" />
   <SvgIcon v-else-if="name === 'pull-request'" :path="mdiSourcePull" size="1.3rem" />
   <SvgIcon v-else-if="name === 'pull-request-closed'" :path="mdiSourceMerge" size="1.3rem" />
+  <SvgIcon v-else-if="name === 'pull-request-metadata'" :path="mdiPencilOutline" size="1.3rem" />
   <SvgIcon v-else-if="name === 'manual-pipeline'" :path="mdiGestureTap" size="1.3rem" />
   <SvgIcon v-else-if="name === 'tag'" :path="mdiTagOutline" size="1.3rem" />
   <SvgIcon v-else-if="name === 'deployment'" :path="mdiPackageVariant" size="1.3rem" />
@@ -26,24 +27,26 @@
   <SvgIcon v-else-if="name === 'org'" :path="mdiAccountGroupOutline" size="1.3rem" />
   <SvgIcon v-else-if="name === 'cron'" :path="mdiCalendarClockOutline" size="1.3rem" />
   <SvgIcon v-else-if="name === 'toolbox'" :path="mdiToolboxOutline" size="1.3rem" />
+  <SvgIcon v-else-if="name === 'puzzle'" :path="mdiPuzzleOutline" size="1.3rem" />
   <SvgIcon
     v-else-if="name === 'status-failure' || name === 'status-error' || name === 'status-killed'"
     type="mdi"
     :path="mdiCloseCircle"
     size="1.3rem"
   />
-  <SvgIcon v-else-if="name === 'status-pending'" :path="mdiRadioboxBlank" size="1.3rem" />
+  <SvgIcon v-else-if="name === 'status-pending' || name === 'status-created'" :path="mdiRadioboxBlank" size="1.3rem" />
   <SvgIcon
     v-else-if="name === 'status-running' || name === 'status-started'"
     type="mdi"
     :path="mdiRadioboxIndeterminateVariant"
     size="1.3rem"
   />
-  <SvgIcon v-else-if="name === 'status-skipped'" :path="mdiMinusCircle" size="1.3rem" />
+  <SvgIcon v-else-if="name === 'status-skipped' || name === 'status-canceled'" :path="mdiMinusCircle" size="1.3rem" />
   <SvgIcon v-else-if="name === 'status-success'" :path="mdiCheckCircle" size="1.3rem" />
   <SvgIcon v-else-if="name === 'alert'" :path="mdiAlertCircle" size="1.3rem" />
   <SvgIcon v-else-if="name === 'question'" :path="mdiHelpCircle" size="1.3rem" />
   <SvgIcon v-else-if="name === 'plus'" :path="mdiPlus" size="1.3rem" />
+  <SvgIcon v-else-if="name === 'refresh'" :path="mdiRefresh" size="1.3rem" />
   <SvgIcon v-else-if="name === 'list'" :path="mdiFormatListBulleted" size="1.3rem" />
   <SvgIcon v-else-if="name === 'heal'" :path="mdiWrenchCogOutline" size="1.3rem" />
   <SvgIcon v-else-if="name === 'turn-off'" :path="mdiPower" size="1.3rem" />
@@ -69,6 +72,8 @@
   <SvgIcon v-else-if="name === 'forge'" :path="mdiCodeBraces" size="1.3rem" />
   <SvgIcon v-else-if="name === 'fullscreen'" :path="mdiFullscreen" size="1.3rem" />
   <SvgIcon v-else-if="name === 'exit-fullscreen'" :path="mdiFullscreenExit" size="1.3rem" />
+  <SvgIcon v-else-if="name === 'expand-all'" :path="mdiUnfoldMoreHorizontal" size="1.3rem" />
+  <SvgIcon v-else-if="name === 'collapse-all'" :path="mdiUnfoldLessHorizontal" size="1.3rem" />
 
   <SvgIcon v-else-if="name === 'visibility-private'" :path="mdiLockOutline" size="1.3rem" />
   <SvgIcon v-else-if="name === 'visibility-internal'" :path="mdiLockOpenOutline" size="1.3rem" />
@@ -154,8 +159,10 @@ import {
   mdiPlayOutline,
   mdiPlus,
   mdiPower,
+  mdiPuzzleOutline,
   mdiRadioboxBlank,
   mdiRadioboxIndeterminateVariant,
+  mdiRefresh,
   mdiShieldKeyOutline,
   mdiSourceBranch,
   mdiSourceCommit,
@@ -167,6 +174,8 @@ import {
   mdiToolboxOutline,
   mdiTrashCanOutline,
   mdiTrayFull,
+  mdiUnfoldLessHorizontal,
+  mdiUnfoldMoreHorizontal,
   mdiWrenchCogOutline,
 } from '@mdi/js';
 import { siForgejo, siGitea } from 'simple-icons';
@@ -179,6 +188,7 @@ export type IconNames =
   | 'branch'
   | 'pull-request'
   | 'pull-request-closed'
+  | 'pull-request-metadata'
   | 'manual-pipeline'
   | 'tag'
   | 'deployment'
@@ -195,10 +205,12 @@ export type IconNames =
   | 'status-failure'
   | 'status-killed'
   | 'status-pending'
+  | 'status-created'
   | 'status-running'
   | 'status-skipped'
   | 'status-started'
   | 'status-success'
+  | 'status-canceled'
   | 'gitea'
   | 'gitlab'
   | 'bitbucket'
@@ -207,6 +219,7 @@ export type IconNames =
   | 'question'
   | 'list'
   | 'plus'
+  | 'refresh'
   | 'blank'
   | 'heal'
   | 'chevron-right'
@@ -240,9 +253,12 @@ export type IconNames =
   | 'org'
   | 'cron'
   | 'toolbox'
+  | 'puzzle'
   | 'forge'
   | 'fullscreen'
   | 'exit-fullscreen'
+  | 'expand-all'
+  | 'collapse-all'
   | 'folder'
   | 'folder-open'
   | 'file';

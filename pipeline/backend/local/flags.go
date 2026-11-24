@@ -22,9 +22,16 @@ import (
 
 var Flags = []cli.Flag{
 	&cli.StringFlag{
-		Name:    "backend-local-temp-dir",
-		Sources: cli.EnvVars("WOODPECKER_BACKEND_LOCAL_TEMP_DIR"),
-		Usage:   "set a different temp dir to clone workflows into",
-		Value:   os.TempDir(),
+		Name:        "backend-local-temp-dir",
+		Sources:     cli.EnvVars("WOODPECKER_BACKEND_LOCAL_TEMP_DIR"),
+		Usage:       "set a different temp dir to clone workflows into",
+		DefaultText: "system temporary directory",
+		Value:       os.TempDir(),
+	},
+	&cli.BoolFlag{
+		Sources: cli.EnvVars("WOODPECKER_BACKEND_LOCAL_ISOLATED_HOME"),
+		Name:    "backend-local-isolated-home",
+		Usage:   "set HOME, USERPROFILE and other variables to an isolated directory, if false we ignore netrc",
+		Value:   true,
 	},
 }

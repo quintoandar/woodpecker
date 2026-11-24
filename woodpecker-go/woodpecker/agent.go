@@ -1,6 +1,23 @@
+// Copyright 2024 Woodpecker Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package woodpecker
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+)
 
 const (
 	pathAgents     = "%s/api/agents"
@@ -15,11 +32,26 @@ func (c *client) AgentCreate(in *Agent) (*Agent, error) {
 	return out, c.post(uri, in, out)
 }
 
-// AgentList returns a list of all registered agents.
+// AgentListOptions represents the options for the agent list.
+type AgentListOptions struct {
+	ListOptions
+}
+
+// AgentList returns the first page of registered agents.
+//
+// Deprecated: use AgentListWithOpts instead, which can ask for any page.
 func (c *client) AgentList() ([]*Agent, error) {
 	out := make([]*Agent, 0, 5)
 	uri := fmt.Sprintf(pathAgents, c.addr)
 	return out, c.get(uri, &out)
+}
+
+// AgentListWithOpts returns a page of registered agents.
+func (c *client) AgentListWithOpts(opt AgentListOptions) ([]*Agent, error) {
+	out := make([]*Agent, 0, 5)
+	uri, _ := url.Parse(fmt.Sprintf(pathAgents, c.addr))
+	uri.RawQuery = opt.getURLQuery().Encode()
+	return out, c.get(uri.String(), &out)
 }
 
 // Agent returns an agent by id.

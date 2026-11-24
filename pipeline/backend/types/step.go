@@ -37,10 +37,11 @@ type Step struct {
 	Networks       []Conn            `json:"networks,omitempty"`
 	DNS            []string          `json:"dns,omitempty"`
 	DNSSearch      []string          `json:"dns_search,omitempty"`
+	DependsOn      []string          `json:"depends_on,omitempty"`
 	OnFailure      bool              `json:"on_failure,omitempty"`
 	OnSuccess      bool              `json:"on_success,omitempty"`
 	Failure        string            `json:"failure,omitempty"`
-	AuthConfig     Auth              `json:"auth_config,omitempty"`
+	AuthConfig     Auth              `json:"auth_config"`
 	NetworkMode    string            `json:"network_mode,omitempty"`
 	Ports          []Port            `json:"ports,omitempty"`
 	BackendOptions map[string]any    `json:"backend_options,omitempty"`

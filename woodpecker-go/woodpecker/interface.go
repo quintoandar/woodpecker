@@ -18,8 +18,6 @@ import (
 	"net/http"
 )
 
-//go:generate mockery --name Client --output mocks --case underscore --note "+build test"
-
 // Client is used to communicate with a Woodpecker server.
 type Client interface {
 	// SetClient sets the http.Client.
@@ -32,7 +30,8 @@ type Client interface {
 	Self() (*User, error)
 
 	// User returns a user by login.
-	User(string) (*User, error)
+	// It is recommended to specify forgeID (default is 1).
+	User(login string, forgeID ...int64) (*User, error)
 
 	// UserList returns a list of all registered users.
 	UserList(opt UserListOptions) ([]*User, error)
@@ -44,7 +43,8 @@ type Client interface {
 	UserPatch(*User) (*User, error)
 
 	// UserDel deletes a user account.
-	UserDel(string) error
+	// It is recommended to specify forgeID (default is 1).
+	UserDel(login string, forgeID ...int64) error
 
 	// Repo returns a repository by name.
 	Repo(repoID int64) (*Repo, error)
@@ -186,6 +186,12 @@ type Client interface {
 	// OrgLookup returns an organization id by name.
 	OrgLookup(orgName string) (*Org, error)
 
+	// OrgPatch updates an organization.
+	OrgPatch(orgID int64, org *OrgPatch) (*Org, error)
+
+	// OrgList returns a list of all organizations.
+	OrgList(opt ListOptions) ([]*Org, error)
+
 	// OrgSecret returns an organization secret by name.
 	OrgSecret(orgID int64, secret string) (*Secret, error)
 
@@ -219,6 +225,9 @@ type Client interface {
 	// QueueInfo returns the queue state.
 	QueueInfo() (*Info, error)
 
+	// Version returns the version of the server.
+	Version() (*Version, error)
+
 	// LogLevel returns the current logging level.
 	LogLevel() (*LogLevel, error)
 
@@ -240,8 +249,15 @@ type Client interface {
 	// CronUpdate update an existing cron job of a repo.
 	CronUpdate(repoID int64, cron *Cron) (*Cron, error)
 
-	// AgentList returns a list of all registered agents.
+	// AgentList returns the first page of registered agents.
+	//
+	// Deprecated: use AgentListWithOpts instead, which can ask for any page.
 	AgentList() ([]*Agent, error)
+
+	// AgentListWithOpts returns a page of registered agents. The server never
+	// returns more than one page, so a caller that needs every agent has to
+	// walk the pages until one comes back short.
+	AgentListWithOpts(opt AgentListOptions) ([]*Agent, error)
 
 	// Agent returns an agent by id.
 	Agent(int64) (*Agent, error)

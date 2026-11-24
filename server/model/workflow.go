@@ -28,6 +28,7 @@ type Workflow struct {
 	AgentID    int64             `json:"agent_id,omitempty"   xorm:"agent_id"`
 	Platform   string            `json:"platform,omitempty"   xorm:"platform"`
 	Environ    map[string]string `json:"environ,omitempty"    xorm:"json 'environ'"`
+	DependsOn  []string          `json:"depends_on,omitempty" xorm:"json 'depends_on'"`
 	AxisID     int               `json:"-"                    xorm:"axis_id"`
 	Children   []*Step           `json:"children,omitempty"   xorm:"-"`
 }
@@ -56,31 +57,4 @@ func IsThereRunningStage(workflows []*Workflow) bool {
 		}
 	}
 	return false
-}
-
-// PipelineStatus determine pipeline status based on corresponding workflow list.
-func PipelineStatus(workflows []*Workflow) StatusValue {
-	status := StatusSuccess
-
-	for _, p := range workflows {
-		if p.Failing() {
-			status = p.State
-		}
-	}
-
-	return status
-}
-
-// WorkflowStatus determine workflow status based on corresponding step list.
-func WorkflowStatus(steps []*Step) StatusValue {
-	status := StatusSuccess
-
-	for _, p := range steps {
-		if p.Failing() {
-			status = p.State
-			break
-		}
-	}
-
-	return status
 }

@@ -5,6 +5,8 @@ The below configuration composes database and cache containers.
 
 Services are accessed using custom hostnames.
 In the example below, the MySQL service is assigned the hostname `database` and is available at `database:3306`.
+Because the name becomes the hostname, every service in the list syntax must set `name` explicitly. In the map syntax the map key is used as the name.
+Service names must be unique within a workflow, otherwise the hostname would resolve to an arbitrary one of them.
 
 ```yaml
 steps:
@@ -37,6 +39,20 @@ services:
       - 51820/udp
 ```
 
+## Stopping
+
+Services that are no longer needed receive a **SIGTERM** signal. If they do not respond, they are forcibly terminated with **SIGKILL**.
+If there are services that do not shut down properly and this doesn't matter, you can simply ignore the error:
+
+```diff
+ services:
+   - name: database
+     image: mysql
++    failure: ignore # we don't care how mysql exits
+     ports:
+       - 3306
+```
+
 ## Configuration
 
 Service containers generally expose environment variables to customize service startup such as default usernames, passwords and ports. Please see the official image documentation to learn more.
@@ -46,8 +62,8 @@ Service containers generally expose environment variables to customize service s
    - name: database
      image: mysql
 +    environment:
-+      - MYSQL_DATABASE=test
-+      - MYSQL_ALLOW_EMPTY_PASSWORD=yes
++      MYSQL_DATABASE: test
++      MYSQL_ALLOW_EMPTY_PASSWORD: yes
 
    - name: cache
      image: redis
@@ -102,8 +118,8 @@ services:
   - name: database
     image: mysql
     environment:
-      - MYSQL_DATABASE=test
-      - MYSQL_ROOT_PASSWORD=example
+      MYSQL_DATABASE: test
+      MYSQL_ROOT_PASSWORD: example
 steps:
   - name: get-version
     image: ubuntu

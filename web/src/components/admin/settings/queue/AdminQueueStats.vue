@@ -1,7 +1,7 @@
 <template>
   <div v-if="stats" class="flex justify-center">
     <div
-      class="border-wp-background-400 dark:border-wp-background-100 bg-wp-background-200 text-wp-text-100 dark:bg-wp-background-100 w-full rounded-md border px-5 py-5"
+      class="border-wp-background-400 dark:border-wp-background-100 bg-wp-background-200 dark:bg-wp-background-200 text-wp-text-100 w-full rounded-md border px-5 py-5"
     >
       <div class="flex w-full">
         <h3 class="flex-1 text-lg leading-tight font-semibold uppercase">
@@ -104,7 +104,7 @@ const data = computed(() => {
       label: t('admin.settings.queue.stats.waiting_on_deps_count'),
       value: props.stats.waiting_on_deps_count,
       percentage: total.value > 0 ? (props.stats.waiting_on_deps_count / total.value) * 100 : 0,
-      color: 'bg-wp-error-100 dark:bg-wp-error-200',
+      color: 'bg-wp-error-100',
     },
   ];
 });

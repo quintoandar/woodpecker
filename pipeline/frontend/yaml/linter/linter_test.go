@@ -15,9 +15,11 @@
 package linter_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/errors"
 	"go.woodpecker-ci.org/woodpecker/v3/pipeline/frontend/yaml"
@@ -87,6 +89,9 @@ steps:
     <<: *base-step
     image: golang:latest
 `,
+	}, {
+		Title: "explicitly privileged container",
+		Data:  "{steps: { build: { image: plugins/docker, privileged: true, settings: { test: 'true' } } }, when: { branch: main, event: push } } }",
 	}}
 
 	for _, testd := range testdatas {
@@ -105,6 +110,37 @@ steps:
 			}}), "expected lint returns no errors")
 		})
 	}
+}
+
+func TestLintDeeplyNestedBackendOptions(t *testing.T) {
+	config := `
+when:
+  event: push
+steps:
+  test:
+    image: golang
+    backend_options:
+      kubernetes:
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: accelerator
+                      operator: In
+                      values:
+                        - nvidia-tesla-v100
+`
+
+	workflow, err := yaml.ParseString(config)
+	require.NoError(t, err)
+
+	err = linter.New().Lint([]*linter.WorkflowConfig{{
+		File:      "deep.yml",
+		RawConfig: config,
+		Workflow:  workflow,
+	}})
+	require.NoError(t, err)
 }
 
 func TestLintErrors(t *testing.T) {
@@ -178,39 +214,75 @@ func TestLintErrors(t *testing.T) {
 			want: "Specified clone image does not match allow list, netrc is not injected",
 		},
 		{
-			from: "steps: { build: { image: golang, secrets: [ { source: mysql_username, target: mysql_username } ] } }",
-			want: "Usage of `secrets` is deprecated, use `environment` in combination with `from_secret`",
-		},
-		{
-			from: "steps: { build: { image: golang, secrets: [ 'mysql_username' ] } }",
-			want: "Usage of `secrets` is deprecated, use `environment` in combination with `from_secret`",
-		},
-		{
 			from: "steps: { build: { image: golang }, publish: { image: golang, depends_on: [ binary ] } }",
 			want: "One or more of the specified dependencies do not exist",
 		},
+		{
+			from: "{steps: { build: { image: golang } }, services: [ { name: database, image: mysql }, { name: database, image: postgres } ] }",
+			want: "Service names must be unique, `database` is used more than once",
+		},
 	}
 
-	for _, test := range testdata {
-		conf, err := yaml.ParseString(test.from)
-		assert.NoError(t, err)
+	for _, tt := range testdata {
+		conf, err := yaml.ParseString(tt.from)
+		require.NoError(t, err)
 
 		lerr := linter.New().Lint([]*linter.WorkflowConfig{{
-			File:      test.from,
-			RawConfig: test.from,
+			File:      tt.from,
+			RawConfig: tt.from,
 			Workflow:  conf,
 		}})
-		assert.Error(t, lerr, "expected lint error for configuration", test.from)
+		assert.Error(t, lerr, "expected lint error for configuration", tt.from)
 
 		lerrors := errors.GetPipelineErrors(lerr)
 		found := false
 		for _, lerr := range lerrors {
-			if lerr.Message == test.want {
+			if lerr.Message == tt.want {
 				found = true
 				break
 			}
 		}
-		assert.True(t, found, "Expected error %q, got %q", test.want, lerrors)
+		assert.True(t, found, "Expected error %q, got %q", tt.want, lerrors)
+	}
+}
+
+func TestDeprecations(t *testing.T) {
+	testdata := []struct {
+		from string
+		want string // empty = expect no deprecation warning
+	}{
+		{from: `steps: { build: { image: golang, commands: ["echo $CI_COMMIT_PRERELEASE"] } }`, want: "Usage of `CI_COMMIT_PRERELEASE` is deprecated, use `CI_PIPELINE_RELEASE_PRE`"},
+		{from: `steps: { build: { image: golang, commands: ["echo $$CI_COMMIT_PRERELEASE"] } }`, want: "Usage of `CI_COMMIT_PRERELEASE` is deprecated, use `CI_PIPELINE_RELEASE_PRE`"},
+		{from: `steps: { build: { image: golang, commands: ["echo ${CI_COMMIT_PRERELEASE}"] } }`, want: "Usage of `CI_COMMIT_PRERELEASE` is deprecated, use `CI_PIPELINE_RELEASE_PRE`"},
+		{from: `steps: { build: { image: golang, commands: ["echo ${CI_COMMIT_AUTHOR_AVATAR}"] } }`, want: "Usage of `CI_COMMIT_AUTHOR_AVATAR` is deprecated, use `CI_PIPELINE_AVATAR`"},
+		{from: `steps: { build: { image: golang, commands: ["echo $CI_PREV_COMMIT_AUTHOR_AVATAR"] } }`, want: "Usage of `CI_PREV_COMMIT_AUTHOR_AVATAR` is deprecated, use `CI_PREV_PIPELINE_AVATAR`"},
+		// new names must not warn
+		{from: `steps: { build: { image: golang, commands: ["echo $CI_PIPELINE_RELEASE_PRE"] } }`, want: ""},
+		{from: `steps: { build: { image: golang, commands: ["echo $CI_PIPELINE_AVATAR"] } }`, want: ""},
+		// must not match a longer var name
+		{from: `steps: { build: { image: golang, commands: ["echo $CI_COMMIT_PRERELEASE_FOO"] } }`, want: ""},
+		// CI_COMMIT_AUTHOR_AVATAR regexp must not fire on CI_PREV_COMMIT_AUTHOR_AVATAR only
+		{from: `steps: { build: { image: golang, commands: ["echo $CI_PREV_COMMIT_AUTHOR_AVATAR"] } }`, want: "Usage of `CI_PREV_COMMIT_AUTHOR_AVATAR` is deprecated, use `CI_PREV_PIPELINE_AVATAR`"},
+	}
+
+	for _, tt := range testdata {
+		conf, err := yaml.ParseString(tt.from)
+		assert.NoError(t, err)
+
+		lerr := linter.New().Lint([]*linter.WorkflowConfig{{
+			File:      tt.from,
+			RawConfig: tt.from,
+			Workflow:  conf,
+		}})
+
+		found := ""
+		for _, e := range errors.GetPipelineErrors(lerr) {
+			if e.Type == errors.PipelineErrorTypeDeprecation && !strings.Contains(e.Message, "runs_on") {
+				found = e.Message
+				break
+			}
+		}
+		assert.Equal(t, tt.want, found, "config %q", tt.from)
 	}
 }
 
@@ -221,33 +293,37 @@ func TestBadHabits(t *testing.T) {
 	}{
 		{
 			from: "steps: { build: { image: golang } }",
-			want: "Set an event filter for all steps or the entire workflow on all items of the `when` block",
+			want: "Consider adding a `when` block with an `event` filter to this step or the entire workflow",
 		},
 		{
 			from: "when: [{branch: xyz}, {event: push}]\nsteps: { build: { image: golang } }",
+			want: "Consider adding a `when` block with an `event` filter to this step or the entire workflow",
+		},
+		{
+			from: "steps: { build: { image: golang, when: [{branch: main}] } }",
 			want: "Set an event filter for all steps or the entire workflow on all items of the `when` block",
 		},
 	}
 
-	for _, test := range testdata {
-		conf, err := yaml.ParseString(test.from)
+	for _, tt := range testdata {
+		conf, err := yaml.ParseString(tt.from)
 		assert.NoError(t, err)
 
 		lerr := linter.New().Lint([]*linter.WorkflowConfig{{
-			File:      test.from,
-			RawConfig: test.from,
+			File:      tt.from,
+			RawConfig: tt.from,
 			Workflow:  conf,
 		}})
-		assert.Error(t, lerr, "expected lint error for configuration", test.from)
+		assert.Error(t, lerr, "expected lint error for configuration", tt.from)
 
 		lerrors := errors.GetPipelineErrors(lerr)
 		found := false
 		for _, lerr := range lerrors {
-			if lerr.Message == test.want {
+			if lerr.Message == tt.want {
 				found = true
 				break
 			}
 		}
-		assert.True(t, found, "Expected error %q, got %q", test.want, lerrors)
+		assert.True(t, found, "Expected error %q, got %q", tt.want, lerrors)
 	}
 }

@@ -22,7 +22,7 @@ import (
 
 var ErrNoTokenProvided = errors.New("please provide a token")
 
-func (s storage) AgentList(p *model.ListOptions) (agents []*model.Agent, _ error) {
+func (s storage) AgentList(p *model.ListOptionsWithAll) (agents []*model.Agent, _ error) {
 	return agents, s.paginate(p).OrderBy("id").Find(&agents)
 }
 
@@ -42,19 +42,21 @@ func (s storage) AgentFindByToken(token string) (*model.Agent, error) {
 
 func (s storage) AgentCreate(agent *model.Agent) error {
 	// only Insert set auto created ID back to object
-	_, err := s.engine.Insert(agent)
-	return err
+	return wrapInsert(s.engine.Insert(agent))
 }
 
 func (s storage) AgentUpdate(agent *model.Agent) error {
-	_, err := s.engine.ID(agent.ID).AllCols().Update(agent)
-	return err
+	return retryWrite(func() error {
+		return wrapUpdate(s.engine.ID(agent.ID).AllCols().Update(agent))
+	})
 }
 
 func (s storage) AgentDelete(agent *model.Agent) error {
-	return wrapDelete(s.engine.ID(agent.ID).Delete(new(model.Agent)))
+	return retryWrite(func() error {
+		return wrapDelete(s.engine.ID(agent.ID).Delete(new(model.Agent)))
+	})
 }
 
-func (s storage) AgentListForOrg(orgID int64, p *model.ListOptions) (agents []*model.Agent, _ error) {
+func (s storage) AgentListForOrg(orgID int64, p *model.ListOptionsWithAll) (agents []*model.Agent, _ error) {
 	return agents, s.paginate(p).Where("org_id = ?", orgID).OrderBy("id").Find(&agents)
 }

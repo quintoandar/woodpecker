@@ -22,6 +22,13 @@ import _ "embed"
 //go:embed HookPush.json
 var HookPush string
 
+// HookPushForced is a sample push hook from a force push. The "before" commit
+// is unreachable after the history rewrite, so it must not be used to compare.
+// https://developer.github.com/v3/activity/events/types/#pushevent
+//
+//go:embed HookPushForced.json
+var HookPushForced string
+
 // HookPushDeleted is a sample push hook that is marked as deleted, and is expected to be ignored.
 const HookPushDeleted = `
 {
@@ -71,8 +78,38 @@ var HookPullRequestMerged string
 //go:embed HookPullRequestClosed.json
 var HookPullRequestClosed string
 
+//go:embed HookPullRequestEdited.json
+var HookPullRequestEdited string
+
 //go:embed HookRelease.json
 var HookRelease string
 
+//go:embed HookTag.json
+var HookTag string
+
+//go:embed HookPullRequestReviewRequested.json
+var HookPullRequestReviewRequested string
+
+//go:embed HookPullRequestMilestoneAdded.json
+var HookPullRequestMilestoneAdded string
+
+//go:embed HookPullRequestMilestoneRemoved.json
+var HookPullRequestMilestoneRemoved string
+
+//go:embed HookPullRequestLabelAdded.json
+var HookPullRequestLabelAdded string
+
+//go:embed HookPullRequestLabelRemoved.json
+var HookPullRequestLabelRemoved string
+
+//go:embed HookPullRequestAssigneeAdded.json
+var HookPullRequestAssigneeAdded string
+
+//go:embed HookPullRequestAssigneeRemoved.json
+var HookPullRequestAssigneeRemoved string
+
 //go:embed HookPullRequestReopened.json
 var HookPullRequestReopened string
+
+//go:embed HookPullRequestLabelsCleared.json
+var HookPullRequestLabelsCleared string

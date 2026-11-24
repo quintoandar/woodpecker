@@ -7,6 +7,12 @@ export interface PipelineError<D = unknown> {
   is_warning: boolean;
 }
 
+export interface CancelInfo {
+  canceled_by_user: string;
+  canceled_by_step: string;
+  superseded_by: number;
+}
+
 // A pipeline for a repository.
 export interface Pipeline {
   id: number;
@@ -18,6 +24,8 @@ export interface Pipeline {
   parent: number;
 
   event: WebhookEvents;
+
+  event_reason: string[];
 
   //  The current status of the pipeline.
   status: PipelineStatus;
@@ -85,6 +93,13 @@ export interface Pipeline {
   workflows?: PipelineWorkflow[];
 
   changed_files?: string[];
+
+  cancel_info: CancelInfo;
+
+  version: string;
+
+  // Only this workflow and its hard dependencies were run (manual pipelines).
+  selected_workflow?: string;
 }
 
 export type PipelineStatus =
@@ -97,7 +112,8 @@ export type PipelineStatus =
   | 'running'
   | 'skipped'
   | 'started'
-  | 'success';
+  | 'success'
+  | 'canceled';
 
 export interface PipelineWorkflow {
   id: number;
@@ -110,7 +126,13 @@ export interface PipelineWorkflow {
   finished?: number;
   agent_id?: number;
   error?: string;
-  children: PipelineStep[];
+  children?: PipelineStep[];
+}
+
+// WorkflowInfo is a workflow a repo config would run, as listed for a manual pipeline
+export interface WorkflowInfo {
+  name: string;
+  depends_on?: string[];
 }
 
 export interface PipelineStep {

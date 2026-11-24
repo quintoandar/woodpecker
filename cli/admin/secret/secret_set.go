@@ -41,10 +41,16 @@ var secretUpdateCmd = &cli.Command{
 		&cli.StringSliceFlag{
 			Name:  "event",
 			Usage: "secret limited to these events",
+			Config: cli.StringConfig{
+				TrimSpace: true,
+			},
 		},
 		&cli.StringSliceFlag{
 			Name:  "image",
 			Usage: "secret limited to these images",
+			Config: cli.StringConfig{
+				TrimSpace: true,
+			},
 		},
 	},
 }
@@ -61,8 +67,8 @@ func secretUpdate(ctx context.Context, c *cli.Command) error {
 		Images: c.StringSlice("image"),
 		Events: c.StringSlice("event"),
 	}
-	if strings.HasPrefix(secret.Value, "@") {
-		path := strings.TrimPrefix(secret.Value, "@")
+	if after, ok := strings.CutPrefix(secret.Value, "@"); ok {
+		path := after
 		out, err := os.ReadFile(path)
 		if err != nil {
 			return err

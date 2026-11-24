@@ -15,16 +15,23 @@
 package datastore
 
 import (
+	"errors"
+	"fmt"
+
 	"xorm.io/builder"
 
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
+	"go.woodpecker-ci.org/woodpecker/v3/server/store/types"
 )
 
 func (s storage) CronCreate(cron *model.Cron) error {
 	if err := cron.Validate(); err != nil {
 		return err
 	}
-	_, err := s.engine.Insert(cron)
+	err := wrapInsert(s.engine.Insert(cron))
+	if errors.Is(err, types.ErrInsertDuplicateDetected) {
+		return fmt.Errorf("create cron failed, duplicate detected: %w", err)
+	}
 	return err
 }
 
@@ -33,35 +40,40 @@ func (s storage) CronFind(repo *model.Repo, id int64) (*model.Cron, error) {
 	return cron, wrapGet(s.engine.ID(id).Where("repo_id = ?", repo.ID).Get(cron))
 }
 
-func (s storage) CronList(repo *model.Repo, p *model.ListOptions) ([]*model.Cron, error) {
+func (s storage) CronList(repo *model.Repo, p *model.ListOptionsWithAll) ([]*model.Cron, error) {
 	var crons []*model.Cron
 	return crons, s.paginate(p).Where("repo_id = ?", repo.ID).OrderBy("name").Find(&crons)
 }
 
 func (s storage) CronUpdate(_ *model.Repo, cron *model.Cron) error {
-	_, err := s.engine.ID(cron.ID).AllCols().Update(cron)
-	return err
+	return retryWrite(func() error {
+		return wrapUpdate(s.engine.ID(cron.ID).AllCols().Update(cron))
+	})
 }
 
 func (s storage) CronDelete(repo *model.Repo, id int64) error {
-	return wrapDelete(s.engine.ID(id).Where("repo_id = ?", repo.ID).Delete(new(model.Cron)))
+	return retryWrite(func() error {
+		return wrapDelete(s.engine.ID(id).Where("repo_id = ?", repo.ID).Delete(new(model.Cron)))
+	})
 }
 
 // CronListNextExecute returns limited number of jobs with NextExec being less or equal to the provided unix timestamp.
 func (s storage) CronListNextExecute(nextExec, limit int64) ([]*model.Cron, error) {
 	crons := make([]*model.Cron, 0, limit)
-	return crons, s.engine.Where(builder.Lte{"next_exec": nextExec}).Limit(int(limit)).Find(&crons)
+	return crons, s.engine.Join("INNER", "repos", "repos.id = crons.repo_id").Where(builder.Lte{"next_exec": nextExec}).And(builder.Eq{"repos.active": true, "enabled": true}).Limit(int(limit)).Find(&crons)
 }
 
 // CronGetLock try to get a lock by updating NextExec.
 func (s storage) CronGetLock(cron *model.Cron, newNextExec int64) (bool, error) {
-	cols, err := s.engine.ID(cron.ID).Where(builder.Eq{"next_exec": cron.NextExec}).
-		Cols("next_exec").Update(&model.Cron{NextExec: newNextExec})
-	gotLock := cols != 0
-
+	var gotLock bool
+	err := retryWrite(func() error {
+		cols, e := s.engine.ID(cron.ID).Where(builder.Eq{"next_exec": cron.NextExec}).
+			Cols("next_exec").Update(&model.Cron{NextExec: newNextExec})
+		gotLock = cols != 0
+		return wrapUpdate(cols, e)
+	})
 	if err == nil && gotLock {
 		cron.NextExec = newNextExec
 	}
-
 	return gotLock, err
 }

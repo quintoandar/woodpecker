@@ -19,10 +19,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/rs/zerolog/log"
 
+	"go.woodpecker-ci.org/woodpecker/v3/server/forge/common"
 	"go.woodpecker-ci.org/woodpecker/v3/server/forge/types"
 	"go.woodpecker-ci.org/woodpecker/v3/server/model"
 )
@@ -34,14 +36,39 @@ const (
 	hookPullRequest = "pull_request"
 	hookRelease     = "release"
 
-	actionOpen   = "opened"
-	actionSync   = "synchronized"
-	actionClose  = "closed"
-	actionReopen = "reopened"
+	actionOpen         = "opened"
+	actionSync         = "synchronized"
+	actionClose        = "closed"
+	actionEdited       = "edited"
+	actionLabelUpdate  = "label_updated"
+	actionLabelCleared = "label_cleared"
+	actionMilestoned   = "milestoned"
+	actionDeMilestoned = "demilestoned"
+	actionAssigned     = "assigned"
+	actionUnAssigned   = "unassigned"
+	actionReopen       = "reopened"
 
 	refBranch = "branch"
 	refTag    = "tag"
 )
+
+var actionList = []string{
+	actionOpen,
+	actionSync,
+	actionClose,
+	actionEdited,
+	actionLabelUpdate,
+	actionMilestoned,
+	actionDeMilestoned,
+	actionLabelCleared,
+	actionAssigned,
+	actionUnAssigned,
+	actionReopen,
+}
+
+func supportedAction(action string) bool {
+	return slices.Contains(actionList, action)
+}
 
 // parseHook parses a Gitea hook from an http.Request and returns
 // Repo and Pipeline detail. If a hook type is unsupported nil values are returned.
@@ -68,6 +95,9 @@ func parsePushHook(payload io.Reader) (repo *model.Repo, pipeline *model.Pipelin
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := push.validate(); err != nil {
+		return nil, nil, err
+	}
 
 	// ignore push events for tags
 	if strings.HasPrefix(push.Ref, "refs/tags/") {
@@ -91,6 +121,9 @@ func parseCreatedHook(payload io.Reader) (repo *model.Repo, pipeline *model.Pipe
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := push.validate(); err != nil {
+		return nil, nil, err
+	}
 
 	if push.RefType != refTag {
 		return nil, nil, nil
@@ -112,23 +145,36 @@ func parsePullRequestHook(payload io.Reader) (*model.Repo, *model.Pipeline, erro
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := pr.validate(); err != nil {
+		return nil, nil, err
+	}
 
 	if pr.PullRequest == nil {
 		// this should never have happened but it did - so we check
 		return nil, nil, fmt.Errorf("parsed pull_request webhook does not contain pull_request info")
 	}
 
-	// Don't trigger pipelines for non-code changes ...
-	if pr.Action != actionOpen &&
-		pr.Action != actionSync &&
-		pr.Action != actionClose &&
-		pr.Action != actionReopen {
-		log.Debug().Msgf("pull_request action is '%s' and no open or sync", pr.Action)
+	// Only trigger pipelines for supported event types
+	if !supportedAction(pr.Action) {
+		log.Debug().Msgf("pull_request action is '%s'. Only '%s' are supported", pr.Action, strings.Join(actionList, "', '"))
 		return nil, nil, nil
 	}
 
 	repo = toRepo(pr.Repo)
 	pipeline = pipelineFromPullRequest(pr)
+
+	// all other actions return the state of labels after the actions where done ... so we should too
+	if pr.Action == actionLabelCleared {
+		pipeline.PullRequestLabels = []string{}
+	}
+	if pr.Action == actionDeMilestoned {
+		pipeline.PullRequestMilestone = ""
+	}
+
+	for i := range pipeline.EventReason {
+		pipeline.EventReason[i] = common.NormalizeEventReason(pipeline.EventReason[i])
+	}
+
 	return repo, pipeline, err
 }
 
@@ -141,6 +187,9 @@ func parseReleaseHook(payload io.Reader) (*model.Repo, *model.Pipeline, error) {
 
 	release, err := parseRelease(payload)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := release.validate(); err != nil {
 		return nil, nil, err
 	}
 

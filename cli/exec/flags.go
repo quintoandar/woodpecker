@@ -35,7 +35,7 @@ var flags = []cli.Flag{
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_METADATA_FILE"),
 		Name:    "metadata-file",
-		Usage:   "path to pipeline metadata file (normally downloaded from UI). Parameters can be adjusted by applying additional cli flags",
+		Usage:   "path to pipeline metadata file (normally downloaded from UI). Parameters can be adjusted by applying additional cli flags. The metadata format is only expected to work with the same Woodpecker version it was downloaded from and is not intended to be portable between versions",
 	},
 	&cli.DurationFlag{
 		Sources: cli.EnvVars("WOODPECKER_TIMEOUT"),
@@ -47,16 +47,25 @@ var flags = []cli.Flag{
 		Sources: cli.EnvVars("WOODPECKER_VOLUMES"),
 		Name:    "volumes",
 		Usage:   "pipeline volumes",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_NETWORKS"),
 		Name:    "network",
 		Usage:   "external networks",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringSliceFlag{
 		Sources: cli.EnvVars("WOODPECKER_PLUGINS_PRIVILEGED"),
 		Name:    "plugins-privileged",
 		Usage:   "Allow plugins to run in privileged mode, if environment variable is defined but empty there will be none",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("WOODPECKER_BACKEND"),
@@ -68,6 +77,11 @@ var flags = []cli.Flag{
 		Sources: cli.EnvVars("WOODPECKER_SECRETS"),
 		Name:    "secrets",
 		Usage:   "map of secrets, ex. 'secret=\"val\",secret2=\"value2\"'",
+	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("WOODPECKER_SECRETS_FILE"),
+		Name:    "secrets-file",
+		Usage:   "path to yaml file with secrets map",
 	},
 
 	//
@@ -151,6 +165,11 @@ var flags = []cli.Flag{
 		Sources: cli.EnvVars("CI_REPO"),
 		Name:    "repo",
 		Usage:   "Set the full name to derive metadata environment variables \"CI_REPO\", \"CI_REPO_NAME\" and \"CI_REPO_OWNER\".",
+	},
+	&cli.Int64Flag{
+		Sources: cli.EnvVars("CI_REPO_ID"),
+		Name:    "repo-id",
+		Usage:   "Set the metadata environment variable \"CI_REPO_ID\".",
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("CI_REPO_REMOTE_ID"),
@@ -240,6 +259,11 @@ var flags = []cli.Flag{
 		Usage:   "Set the metadata environment variable \"CI_PIPELINE_DEPLOY_TASK\".",
 	},
 	&cli.StringFlag{
+		Sources: cli.EnvVars("CI_PIPELINE_RELEASE_TITLE"),
+		Name:    "pipeline-release",
+		Usage:   "Set the metadata environment variable \"CI_PIPELINE_RELEASE_TITLE\".",
+	},
+	&cli.StringFlag{
 		Sources: cli.EnvVars("CI_PIPELINE_FILES"),
 		Usage:   "Set the metadata environment variable \"CI_PIPELINE_FILES\", either json formatted list of strings, or comma separated string list.",
 		Name:    "pipeline-changed-files",
@@ -270,6 +294,11 @@ var flags = []cli.Flag{
 		Name:    "commit-message",
 		Usage:   "Set the metadata environment variable \"CI_COMMIT_MESSAGE\".",
 	},
+	&cli.Int64Flag{
+		Sources: cli.EnvVars("CI_COMMIT_TIMESTAMP"),
+		Name:    "commit-timestamp",
+		Usage:   "Set the metadata environment variable \"CI_COMMIT_TIMESTAMP\".",
+	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("CI_COMMIT_AUTHOR"),
 		Name:    "commit-author-name",
@@ -289,6 +318,14 @@ var flags = []cli.Flag{
 		Sources: cli.EnvVars("CI_COMMIT_PULL_REQUEST_LABELS"),
 		Name:    "commit-pull-labels",
 		Usage:   "Set the metadata environment variable \"CI_COMMIT_PULL_REQUEST_LABELS\".",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
+	},
+	&cli.StringFlag{
+		Sources: cli.EnvVars("CI_COMMIT_PULL_REQUEST_MILESTONE"),
+		Name:    "commit-pull-milestone",
+		Usage:   "Set the metadata environment variable \"CI_COMMIT_PULL_REQUEST_MILESTONE\".",
 	},
 	&cli.BoolFlag{
 		Sources: cli.EnvVars("CI_COMMIT_PULL_REQUEST_DRAFT"),
@@ -296,9 +333,11 @@ var flags = []cli.Flag{
 		Usage:   "Set the metadata environment variable \"CI_COMMIT_PULL_REQUEST_DRAFT\".",
 	},
 	&cli.BoolFlag{
-		Sources: cli.EnvVars("CI_COMMIT_PRERELEASE"),
+		// CI_COMMIT_PRERELEASE is kept as a deprecated alias.
+		// TODO remove CI_COMMIT_PRERELEASE in next major
+		Sources: cli.EnvVars("CI_PIPELINE_RELEASE_PRE", "CI_COMMIT_PRERELEASE"),
 		Name:    "commit-release-is-pre",
-		Usage:   "Set the metadata environment variable \"CI_COMMIT_PRERELEASE\".",
+		Usage:   "Set the metadata environment variable \"CI_PIPELINE_RELEASE_PRE\".",
 	},
 	&cli.Int64Flag{
 		Sources: cli.EnvVars("CI_PREV_PIPELINE_NUMBER"),
@@ -370,6 +409,11 @@ var flags = []cli.Flag{
 		Name:    "prev-commit-message",
 		Usage:   "Set the metadata environment variable \"CI_PREV_COMMIT_MESSAGE\".",
 	},
+	&cli.Int64Flag{
+		Sources: cli.EnvVars("CI_PREV_COMMIT_TIMESTAMP"),
+		Name:    "prev-commit-timestamp",
+		Usage:   "Set the metadata environment variable \"CI_PREV_COMMIT_TIMESTAMP\".",
+	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("CI_PREV_COMMIT_AUTHOR"),
 		Name:    "prev-commit-author-name",
@@ -399,6 +443,9 @@ var flags = []cli.Flag{
 		Sources: cli.EnvVars("CI_ENV"),
 		Name:    "env",
 		Usage:   "Set the metadata environment variable \"CI_ENV\".",
+		Config: cli.StringConfig{
+			TrimSpace: true,
+		},
 	},
 	&cli.StringFlag{
 		Sources: cli.EnvVars("CI_FORGE_TYPE"),
